@@ -1,0 +1,13 @@
+# Render Blueprint - one-click deploy of the MangaPill image proxy.
+# On Render: New -> Blueprint -> connect your repo -> Apply.
+services:
+  - type: web
+    name: mangapill-image-proxy
+    runtime: node
+    buildCommand: ""
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.19.4
