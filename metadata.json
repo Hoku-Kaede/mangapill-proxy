@@ -1,0 +1,6 @@
+{
+  "name": "MangaDex Android Project & Reader",
+  "description": "Native Android Jetpack Compose MangaDex reader project generator, codebase explorer, and interactive manga reader.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

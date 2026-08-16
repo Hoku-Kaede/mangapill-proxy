@@ -1,0 +1,18 @@
+node_modules/
+build/
+dist/
+coverage/
+build-output/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Capacitor / Android (generated platform)
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.idea/
+android/app/build/
+android/capacitor-cordova-android-plugins/src/main/assets/
+android/app/src/main/assets/public/
