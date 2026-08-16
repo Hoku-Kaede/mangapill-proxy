@@ -5,7 +5,7 @@ services:
     name: mangapill-image-proxy
     runtime: node
     buildCommand: ""
-    startCommand: npm start
+    startCommand: node server/proxy.mjs
     plan: free
     healthCheckPath: /health
     envVars:

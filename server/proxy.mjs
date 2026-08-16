@@ -3,14 +3,13 @@
 // Browsers cannot forge that header, so this tiny server fetches the image
 // server-side and streams it back with permissive CORS headers.
 //
-// Deploy this for free (Render / Glitch / Railway), then point
-// src/services/consumet.ts -> MANGAPILL_IMAGE_PROXY at the deployed URL:
+// Uses only Node built-ins (node:http + global fetch), so it runs anywhere
+// with Node >= 18 and no npm install step.
 //
 //   https://<your-proxy>/image?url=<urlencoded-cdn-image-url>
 
-import express from 'express';
+import http from 'node:http';
 
-const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Only relay known MangaPill CDN hosts so this cannot be abused as an open proxy.
@@ -25,20 +24,32 @@ function isAllowed(url) {
   }
 }
 
-app.use((req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Headers', '*');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
-app.get('/image', async (req, res) => {
-  const { url } = req.query;
-  if (typeof url !== 'string' || !isAllowed(url)) {
-    return res.status(400).json({ error: 'Invalid or disallowed image URL' });
+const server = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
   }
+
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.pathname === '/health') {
+    res.writeHead(200);
+    return res.end('ok');
+  }
+  if (url.pathname !== '/image') {
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+
+  const target = url.searchParams.get('url');
+  if (!target || !isAllowed(target)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ error: 'Invalid or disallowed image URL' }));
+  }
+
   try {
-    const upstream = await fetch(url, {
+    const upstream = await fetch(target, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
@@ -46,19 +57,18 @@ app.get('/image', async (req, res) => {
       },
     });
     if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: `Upstream returned ${upstream.status}` });
+      res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: `Upstream returned ${upstream.status}` }));
     }
     const type = upstream.headers.get('content-type') || 'image/jpeg';
     const buf = Buffer.from(await upstream.arrayBuffer());
-    res.set('Content-Type', type);
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(buf);
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' });
+    res.end(buf);
   } catch (err) {
-    console.error('[image proxy] failed:', url, err);
-    res.status(502).json({ error: 'Failed to fetch image' });
+    console.error('[image proxy] failed:', target, err);
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to fetch image' }));
   }
 });
 
-app.get('/health', (_req, res) => res.send('ok'));
-
-app.listen(PORT, () => console.log(`[image proxy] listening on ${PORT}`));
+server.listen(PORT, () => console.log(`[image proxy] listening on ${PORT}`));
