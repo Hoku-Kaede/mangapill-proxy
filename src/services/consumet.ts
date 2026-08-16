@@ -10,11 +10,9 @@ const BASE = 'https://consumet-api.onrender.com';
 
 // MangaPill images come from a hotlink-protected CDN that only serves requests
 // carrying `Referer: https://mangapill.com/`. Browsers can't send that header,
-// so images are relayed through the small Express proxy in server/proxy.mjs.
-// Set this to your deployed instance, e.g.
-//   const MANGAPILL_IMAGE_PROXY = 'https://my-proxy.onrender.com/image?url=';
-// Leave it empty to use the CDN URLs directly (will 403 for MangaPill images).
-const MANGAPILL_IMAGE_PROXY = '';
+// so images are relayed through the small Node proxy in server/proxy.mjs
+// (deployed on Render). Keep the trailing `/image?url=`.
+const MANGAPILL_IMAGE_PROXY = 'https://mangapill-image-proxy.onrender.com/image?url=';
 
 function mangaPillImage(img: string): string {
   return MANGAPILL_IMAGE_PROXY ? MANGAPILL_IMAGE_PROXY + encodeURIComponent(img) : img;
