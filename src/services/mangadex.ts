@@ -4,9 +4,32 @@ import { MangaItem, ChapterItem, ChapterPagesData } from '../types';
 // endpoints are Cloudflare-blocked). MangaDex is verified working end-to-end:
 // search -> feed -> at-home server -> page images.
 
+const MANGADEX_API_PROXY = '/api/mangadex?path=';
+const MANGADEX_IMG_PROXY = '/api/mdimage?url=';
+
+function mdApiUrl(path: string): string {
+  return MANGADEX_API_PROXY + encodeURIComponent(path);
+}
+
+function mdImageUrl(url: string): string {
+  return MANGADEX_IMG_PROXY + encodeURIComponent(url);
+}
+
+// Direct URLs used as fallback on Capacitor (no CORS issues there)
 const API_BASE = 'https://api.mangadex.org';
 const IMAGE_BASE = 'https://uploads.mangadex.org';
 const MAX_RETRIES = 2;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const IS_CAPACITOR = typeof (globalThis as any).window !== 'undefined' && !!(globalThis as any).window?.Capacitor;
+
+function apiUrl(path: string): string {
+  return IS_CAPACITOR ? `${API_BASE}${path}` : mdApiUrl(path);
+}
+
+function imgUrl(url: string): string {
+  return IS_CAPACITOR ? url : mdImageUrl(url);
+}
 
 // Origin filter for search/suggestions. MangaDex exposes a series' country of
 // origin via `attributes.originalLanguage` ('ja' = Japanese manga, 'ko' = Korean
@@ -30,7 +53,7 @@ async function loadWebtoonTagIds(): Promise<string[]> {
   if (webtoonTagIds) return webtoonTagIds;
   if (!webtoonTagFetch) {
     webtoonTagFetch = (async () => {
-      const res = await mdFetch(`${API_BASE}/manga/tag`);
+      const res = await mdFetch(apiUrl('/manga/tag'));
       const json = await res.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const idByName: Record<string, string> = {};
@@ -161,7 +184,7 @@ function mapManga(dto: any): MangaItem {
     translatedTitle: alt,
     description: localizedText(attrs.description, 'No description provided.'),
     coverUrl: coverFileName(dto)
-      ? `${IMAGE_BASE}/covers/${dto.id}/${coverFileName(dto)}.256.jpg`
+      ? imgUrl(`${IMAGE_BASE}/covers/${dto.id}/${coverFileName(dto)}.256.jpg`)
       : '',
     status: attrs.status || 'unknown',
     tags: tagNames,
@@ -198,7 +221,7 @@ export async function getMangaSuggestions(
   });
   const originParams = await originFilterParams(origin);
   originParams.forEach((v, k) => params.append(k, v));
-  const res = await mdFetch(`${API_BASE}/manga?${params.toString()}`);
+  const res = await mdFetch(apiUrl(`/manga?${params.toString()}`));
   const json = await res.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (json?.data || []).map(mapManga);
@@ -222,7 +245,7 @@ export async function searchManga(
   });
   const originParams = await originFilterParams(origin);
   originParams.forEach((v, k) => params.append(k, v));
-  const res = await mdFetch(`${API_BASE}/manga?${params.toString()}`);
+  const res = await mdFetch(apiUrl(`/manga?${params.toString()}`));
   const json = await res.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let list = (json?.data || []).map(mapManga);
@@ -261,7 +284,7 @@ export async function getMangaChapters(mangaId: string): Promise<ChapterListResu
     params.set('limit', String(pageSize));
     params.set('offset', String(offset));
     params.set('includes[]', 'scanlation_group');
-    const res = await mdFetch(`${API_BASE}/manga/${mangaId}/feed?${params.toString()}`);
+    const res = await mdFetch(apiUrl(`/manga/${mangaId}/feed?${params.toString()}`));
     const json = await res.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any[] = json?.data || [];
@@ -293,7 +316,7 @@ export async function getMangaChapters(mangaId: string): Promise<ChapterListResu
 }
 
 export async function getChapterPages(chapterId: string): Promise<ChapterPagesData> {
-  const res = await mdFetch(`${API_BASE}/at-home/server/${chapterId}`);
+  const res = await mdFetch(apiUrl(`/at-home/server/${chapterId}`));
   const json = await res.json();
   const baseUrl = json?.baseUrl;
   const hash = json?.chapter?.hash;
@@ -303,10 +326,10 @@ export async function getChapterPages(chapterId: string): Promise<ChapterPagesDa
     throw new Error('This chapter has no readable pages.');
   }
 
-  const pages = files.map((f: string) => `${baseUrl}/data/${hash}/${f}`);
+  const pages = files.map((f: string) => imgUrl(`${baseUrl}/data/${hash}/${f}`));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dataSaver = (json?.chapter?.['data-saver'] || []) as string[];
-  const dataSaverPages = dataSaver.map((f: string) => `${baseUrl}/data-saver/${hash}/${f}`);
+  const dataSaverPages = dataSaver.map((f: string) => imgUrl(`${baseUrl}/data-saver/${hash}/${f}`));
 
   return {
     chapterId,
