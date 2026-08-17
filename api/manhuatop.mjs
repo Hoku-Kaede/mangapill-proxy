@@ -1,11 +1,11 @@
 export const config = { runtime: 'edge' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const BASE = 'https://comics.inkr.com';
+const BASE = 'https://manhuahot.com';
 
 export default async function handler(req) {
   const url = new URL(req.url);
-  const path = url.searchParams.get('path') || '/manhua';
+  const path = url.searchParams.get('path') || '/';
   const target = `${BASE}${path}`;
 
   const fetchOptions = {
@@ -14,14 +14,14 @@ export default async function handler(req) {
       'User-Agent': UA,
       'Accept': req.headers.get('accept') || '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://comics.inkr.com/',
+      'Referer': 'https://manhuahot.com/',
     },
     redirect: 'follow',
   };
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     fetchOptions.body = await req.text();
-    fetchOptions.headers['Content-Type'] = req.headers.get('content-type') || 'application/json';
+    fetchOptions.headers['Content-Type'] = req.headers.get('content-type') || 'application/x-www-form-urlencoded';
   }
 
   try {
@@ -71,7 +71,7 @@ export default async function handler(req) {
 
 function rewriteUrls(html, base) {
   html = html.replace(
-    /((?:href|src|action)=["'])(https?:\/\/comics\.inkr\.com)(\/[^"']*?)(["'])/g,
+    /((?:href|src|action)=["'])(https?:\/\/manhuahot\.com)(\/[^"']*?)(["'])/g,
     (match, prefix, _origin, path, suffix) => {
       return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
     }
@@ -92,8 +92,8 @@ function rewriteUrls(html, base) {
       return match;
     }
   );
-  html = html.replace(/"https?:\/\/comics\.inkr\.com/g, '"/api/manhuatop?path=');
-  html = html.replace(/'https?:\/\/comics\.inkr\.com/g, "'/api/manhuatop?path=");
-  html = html.replace(/https?:\\\/\\\/comics\.inkr\.com/g, '/api/manhuatop?path=');
+  html = html.replace(/"https?:\/\/manhuahot\.com/g, '"/api/manhuatop?path=');
+  html = html.replace(/'https?:\/\/manhuahot\.com/g, "'/api/manhuatop?path=");
+  html = html.replace(/https?:\\\/\\\/manhuahot\.com/g, '/api/manhuatop?path=');
   return html;
 }
