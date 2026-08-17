@@ -3,14 +3,6 @@ export const config = { runtime: 'edge' };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const SITE_CSS = {
-  'asuracomic.net': `
-    <style id="hide-premium">
-      [class*="announcement"], [class*="embla-announcements"],
-      [class*="premium"], [class*="subscribe"], [class*="pricing"],
-      [class*="plan"], [class*="banner-ad"], [class*="promo"] {
-        display: none !important;
-      }
-    </style>`,
   'vortexscans.org': `
     <style id="hide-share-footer">
       [class*="share"], [class*="social"], [class*="discord"],
@@ -37,6 +29,7 @@ export default async function handler(req) {
 
   const base = parsed.origin;
   const hostname = parsed.hostname;
+  const proxyOrigin = url.origin;
 
   const fetchOptions = {
     method: req.method,
@@ -76,16 +69,26 @@ export default async function handler(req) {
     });
 
     respHeaders.set('Access-Control-Allow-Origin', '*');
-    respHeaders.delete('content-security-policy-report-only');
 
     let body;
     if (isHtml) {
       let html = await upstream.text();
-      html = rewriteUrls(html, base, hostname);
       const siteCss = SITE_CSS[hostname] || '';
+
+      // 1. Inject <base> first, BEFORE rewriting, so relative asset URLs resolve to original domain
+      if (!html.includes('<base')) {
+        html = html.replace(/<head([^>]*)>/i, '<head$1><base href="' + base + '/">');
+      }
+
+      // 2. Now rewrite <a href> navigation to go through proxy
+      //    Skip <base> tag's own href
+      html = rewriteNavigation(html, base, hostname, proxyOrigin);
+
+      // 3. Inject site-specific CSS
       if (siteCss) {
         html = injectCss(html, siteCss);
       }
+
       body = new TextEncoder().encode(html);
     } else {
       body = await upstream.arrayBuffer();
@@ -103,59 +106,35 @@ export default async function handler(req) {
   }
 }
 
-function rewriteUrls(html, base, hostname) {
-  // Step 1: Make all relative asset URLs absolute to the original domain
-  // (CSS, JS, images, fonts should load directly from the source)
-  html = html.replace(
-    /((?:href|src|action)=["'])(\/[^"']*?)(["'])/g,
-    (match, prefix, path, suffix) => {
-      if (path.startsWith('//')) return match;
-      if (path.startsWith('http://') || path.startsWith('https://')) return match;
-      return prefix + base + path + suffix;
-    }
-  );
-  html = html.replace(
-    /((?:href|src|action)=)([^"'\s>]+)(?=[\s>])/g,
-    (match, prefix, path) => {
-      if (path.startsWith('//') || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return match;
-      if (path.startsWith('/')) return prefix + base + path;
-      return match;
-    }
-  );
-
-  // Step 2: Rewrite navigation links (href on <a> tags) to go through proxy
-  html = html.replace(
-    /href=["']((?:https?:\/\/)?[^"']*?)["']/gi,
-    (match, url) => {
+function rewriteNavigation(html, base, hostname, proxyOrigin) {
+  // Rewrite href attributes to absolute proxy URLs for same-origin navigation
+  // Skip <base> tags — their href should stay pointing at the original domain
+  return html.replace(
+    /(<base\b[^>]*?)href=["']([^"']*)["']/gi,
+    (match) => match // preserve <base> href as-is
+  ).replace(
+    /(<(?!base\b)(?:a|area)\b[^>]*?)href=["']((?:https?:\/\/)?[^"']*)["']/gi,
+    (match, prefix, val) => {
       try {
+        if (val.startsWith('#') || val.startsWith('javascript:') || val.startsWith('mailto:') || val.startsWith('tel:')) {
+          return match;
+        }
         let targetUrl;
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-          targetUrl = new URL(url);
-        } else if (url.startsWith('/')) {
-          targetUrl = new URL(base + url);
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          targetUrl = new URL(val);
+        } else if (val.startsWith('/')) {
+          targetUrl = new URL(base + val);
         } else {
           return match;
         }
         if (targetUrl.hostname === hostname) {
-          return 'href="/api/proxy?url=' + encodeURIComponent(targetUrl.origin + targetUrl.pathname + targetUrl.search) + '"';
+          const full = targetUrl.origin + targetUrl.pathname + targetUrl.search + targetUrl.hash;
+          return prefix + 'href="' + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full) + '"';
         }
       } catch {}
       return match;
     }
   );
-
-  // Step 3: Rewrite absolute domain URLs in JS strings (AJAX, navigation)
-  const escaped = hostname.replace(/\./g, '\\.');
-  html = html.replace(
-    new RegExp(`"https?://${escaped}([^"]*)"`, 'g'),
-    (_, path) => '"/api/proxy?url=' + encodeURIComponent(base + path)
-  );
-  html = html.replace(
-    new RegExp(`'https?://${escaped}([^']*)'`, 'g'),
-    (_, path) => "'/api/proxy?url=" + encodeURIComponent(base + path)
-  );
-
-  return html;
 }
 
 function injectCss(html, css) {
