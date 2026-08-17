@@ -1,88 +1,99 @@
-// Vercel serverless function: /api/kisskh
-// Proxies kisskh.is API calls with CORS headers.
+// Vercel Edge Function: /api/kisskh
+// Uses edge runtime to potentially bypass Cloudflare IP blocks.
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
+export const config = { runtime: 'edge' };
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const BASE = 'https://kisskh.is/api';
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+export default async function handler(req) {
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  };
+
   if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    return res.end();
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  const action = req.query.action || '';
-  const id = req.query.id || '';
-  const q = req.query.q || '';
-  const page = req.query.page || '1';
-  const pageSize = req.query.pageSize || '20';
-  const type = req.query.type || '0';
-  const sub = req.query.sub || '0';
-  const country = req.query.country || '0';
-  const status = req.query.status || '0';
+  const url = new URL(req.url);
+  const action = url.searchParams.get('action') || '';
+  const id = url.searchParams.get('id') || '';
+  const q = url.searchParams.get('q') || '';
+  const page = url.searchParams.get('page') || '1';
+  const pageSize = url.searchParams.get('pageSize') || '20';
+  const type = url.searchParams.get('type') || '0';
+  const sub = url.searchParams.get('sub') || '0';
+  const country = url.searchParams.get('country') || '0';
+  const status = url.searchParams.get('status') || '0';
+
+  let target = '';
+  let cacheMaxAge = 300;
+
+  if (action === 'list') {
+    target = `${BASE}/DramaList/List?page=${page}&type=${type}&sub=${sub}&country=${country}&status=${status}&pageSize=${pageSize}`;
+    cacheMaxAge = 600;
+  } else if (action === 'search') {
+    target = `${BASE}/DramaList/Search?q=${encodeURIComponent(q)}&type=${type}`;
+    cacheMaxAge = 300;
+  } else if (action === 'drama') {
+    target = `${BASE}/DramaList/Drama/${id}`;
+    cacheMaxAge = 600;
+  } else if (action === 'episode') {
+    const ts = url.searchParams.get('ts') || '';
+    const time = url.searchParams.get('time') || '';
+    const kkey = url.searchParams.get('kkey') || '';
+    const err = url.searchParams.get('err') || '';
+    target = `${BASE}/DramaList/Episode/${id}.png?err=${err}&ts=${ts}&time=${time}&kkey=${kkey}`;
+    cacheMaxAge = 0;
+  } else if (action === 'show') {
+    target = `${BASE}/DramaList/Show`;
+    cacheMaxAge = 600;
+  } else if (action === 'lastupdate') {
+    target = `${BASE}/DramaList/LastUpdate?ispc=true`;
+    cacheMaxAge = 300;
+  } else if (action === 'toprating') {
+    target = `${BASE}/DramaList/TopRating?ispc=true`;
+    cacheMaxAge = 600;
+  } else if (action === 'mostview') {
+    target = `${BASE}/DramaList/MostView?ispc=true&c=${page}`;
+    cacheMaxAge = 600;
+  } else {
+    return new Response(JSON.stringify({ error: 'Invalid action' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   try {
-    let url = '';
-    let cacheMaxAge = 300;
-
-    if (action === 'list') {
-      url = `${BASE}/DramaList/List?page=${page}&type=${type}&sub=${sub}&country=${country}&status=${status}&pageSize=${pageSize}`;
-      cacheMaxAge = 600;
-    } else if (action === 'search') {
-      url = `${BASE}/DramaList/Search?q=${encodeURIComponent(q)}&type=${type}`;
-      cacheMaxAge = 300;
-    } else if (action === 'drama') {
-      url = `${BASE}/DramaList/Drama/${id}`;
-      cacheMaxAge = 600;
-    } else if (action === 'episode') {
-      // Try to fetch episode video source (may need kkey from client)
-      const ts = req.query.ts || '';
-      const time = req.query.time || '';
-      const kkey = req.query.kkey || '';
-      const err = req.query.err || '';
-      url = `${BASE}/DramaList/Episode/${id}.png?err=${err}&ts=${ts}&time=${time}&kkey=${kkey}`;
-      cacheMaxAge = 0;
-    } else if (action === 'show') {
-      url = `${BASE}/DramaList/Show`;
-      cacheMaxAge = 600;
-    } else if (action === 'lastupdate') {
-      url = `${BASE}/DramaList/LastUpdate?ispc=true`;
-      cacheMaxAge = 300;
-    } else if (action === 'toprating') {
-      url = `${BASE}/DramaList/TopRating?ispc=true`;
-      cacheMaxAge = 600;
-    } else if (action === 'mostview') {
-      url = `${BASE}/DramaList/MostView?ispc=true&c=${page}`;
-      cacheMaxAge = 600;
-    } else {
-      return res.status(400).json({ error: 'Invalid action' });
-    }
-
-    const upstream = await fetch(url, {
+    const upstream = await fetch(target, {
       headers: {
         'User-Agent': UA,
-        'Accept': 'application/json',
-      'Referer': 'https://kisskh.is/',
-      'Origin': 'https://kisskh.is',
+        'Accept': '*/*',
       },
     });
 
     if (!upstream.ok) {
       const errText = await upstream.text();
-      console.error('[kisskh proxy] upstream error:', upstream.status, errText.substring(0, 200));
-      return res.status(upstream.status).json({ error: `Upstream ${upstream.status}` });
+      return new Response(JSON.stringify({ error: `Upstream ${upstream.status}`, detail: errText.substring(0, 200) }), {
+        status: upstream.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     const json = await upstream.json();
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', `public, max-age=${cacheMaxAge}`);
-    return res.send(json);
+    return new Response(JSON.stringify(json), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${cacheMaxAge}`,
+      },
+    });
   } catch (err) {
-    console.error('[kisskh proxy] failed:', err);
-    return res.status(502).json({ error: 'Failed to fetch from KissKH' });
+    return new Response(JSON.stringify({ error: 'Failed to fetch from KissKH', detail: String(err) }), {
+      status: 502,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 }
-
-export const config = {
-  api: { responseLimit: false },
-};
