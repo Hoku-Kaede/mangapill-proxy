@@ -29,11 +29,6 @@ export interface DramaDetail {
   episodes: { id: number; number: number; sub: number }[];
 }
 
-export interface DramaVideoSource {
-  src: string;
-  type: string;
-}
-
 // Country filter IDs
 export const DRAMA_COUNTRIES = [
   { id: 0, name: 'All' },
@@ -99,19 +94,24 @@ export async function getDramaDetail(id: number): Promise<DramaDetail> {
   };
 }
 
-export async function getEpisodeSource(episodeId: number): Promise<DramaVideoSource[]> {
-  try {
-    const json = await kfetch(`?action=episode&id=${episodeId}`);
-    // The endpoint may return { src, sources } or similar
-    const src = json?.src || json?.Link || '';
-    if (src) return [{ src, type: 'application/x-mpegURL' }];
-    const sources = json?.sources || [];
-    return sources
-      .filter((s: any) => s?.src)
-      .map((s: any) => ({ src: s.src, type: s.type || 'application/x-mpegURL' }));
-  } catch {
-    return [];
-  }
+export async function getShow(): Promise<DramaItem[]> {
+  const json = await kfetch(`?action=show`);
+  return (Array.isArray(json) ? json : []).map(mapDrama);
+}
+
+export async function getLastUpdated(): Promise<DramaItem[]> {
+  const json = await kfetch(`?action=lastupdate`);
+  return (Array.isArray(json) ? json : []).map(mapDrama);
+}
+
+export async function getTopRated(): Promise<DramaItem[]> {
+  const json = await kfetch(`?action=toprating`);
+  return (Array.isArray(json) ? json : []).map(mapDrama);
+}
+
+export async function getMostViewed(page: number = 1): Promise<DramaItem[]> {
+  const json = await kfetch(`?action=mostview&page=${page}`);
+  return (Array.isArray(json) ? json : []).map(mapDrama);
 }
 
 function mapDrama(dto: any): DramaItem {
