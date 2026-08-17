@@ -173,7 +173,7 @@ export function DramaSection() {
             {playing.drama.title} — Ep {epNum}
           </span>
           <a
-            href={`https://kisskh.co/Explore?type=Drama&id=${playing.drama.id}`}
+            href={`https://kisskh.is/Explore?type=Drama&id=${playing.drama.id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="px-3 py-1.5 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
@@ -193,7 +193,7 @@ export function DramaSection() {
               <AlertTriangle className="w-8 h-8 text-red-500" />
               <span className="text-xs uppercase tracking-widest text-center">{sourceError}</span>
               <a
-                href={`https://kisskh.co/Watch/${playing.drama.id}-ep-${epNum}`}
+                href={`https://kisskh.is/Watch/${playing.drama.id}-ep-${epNum}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 px-4 py-2 bg-white text-black font-bold uppercase text-[10px] tracking-[0.15em] hover:bg-red-500 hover:text-white rounded-xs transition-colors flex items-center gap-2"
@@ -224,7 +224,7 @@ export function DramaSection() {
             {selected.title}
           </span>
           <a
-            href={`https://kisskh.co/Explore?type=Drama&id=${selected.id}`}
+            href={`https://kisskh.is/Explore?type=Drama&id=${selected.id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="px-3 py-1.5 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"

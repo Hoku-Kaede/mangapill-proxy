@@ -2,7 +2,7 @@
 // Proxies kisskh.is API calls with CORS headers.
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-const BASE = 'https://kisskh.co/api';
+const BASE = 'https://kisskh.is/api';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -62,8 +62,8 @@ export default async function handler(req, res) {
       headers: {
         'User-Agent': UA,
         'Accept': 'application/json',
-        'Referer': 'https://kisskh.co/',
-        'Origin': 'https://kisskh.co',
+      'Referer': 'https://kisskh.is/',
+      'Origin': 'https://kisskh.is',
       },
     });
 
