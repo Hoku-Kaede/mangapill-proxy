@@ -14,7 +14,7 @@ const SITE_CSS = {
   'vortexscans.org': `
     <style id="hide-share-footer">
       [class*="share"], [class*="social"], [class*="discord"],
-      [class*="report"], [class*="footer"], footer {
+      [class*="report"], footer, [class*="footer"] {
         display: none !important;
       }
     </style>`,
@@ -104,35 +104,47 @@ export default async function handler(req) {
 }
 
 function rewriteUrls(html, base, hostname) {
-  html = html.replace(
-    /((?:href|src|action)=["'])(https?:\/\/[^"']+)(["'])/g,
-    (match, prefix, fullUrl, suffix) => {
-      try {
-        const u = new URL(fullUrl);
-        if (u.hostname === hostname) {
-          return prefix + '/api/proxy?url=' + encodeURIComponent(u.origin + u.pathname + u.search) + suffix;
-        }
-      } catch {}
-      return match;
-    }
-  );
+  // Step 1: Make all relative asset URLs absolute to the original domain
+  // (CSS, JS, images, fonts should load directly from the source)
   html = html.replace(
     /((?:href|src|action)=["'])(\/[^"']*?)(["'])/g,
     (match, prefix, path, suffix) => {
       if (path.startsWith('//')) return match;
       if (path.startsWith('http://') || path.startsWith('https://')) return match;
-      return prefix + '/api/proxy?url=' + encodeURIComponent(base + path) + suffix;
+      return prefix + base + path + suffix;
     }
   );
   html = html.replace(
     /((?:href|src|action)=)([^"'\s>]+)(?=[\s>])/g,
     (match, prefix, path) => {
       if (path.startsWith('//') || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return match;
-      if (path.startsWith('/')) return prefix + '/api/proxy?url=' + encodeURIComponent(base + path);
+      if (path.startsWith('/')) return prefix + base + path;
       return match;
     }
   );
-  // Rewrite absolute domain URLs in JS strings
+
+  // Step 2: Rewrite navigation links (href on <a> tags) to go through proxy
+  html = html.replace(
+    /href=["']((?:https?:\/\/)?[^"']*?)["']/gi,
+    (match, url) => {
+      try {
+        let targetUrl;
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          targetUrl = new URL(url);
+        } else if (url.startsWith('/')) {
+          targetUrl = new URL(base + url);
+        } else {
+          return match;
+        }
+        if (targetUrl.hostname === hostname) {
+          return 'href="/api/proxy?url=' + encodeURIComponent(targetUrl.origin + targetUrl.pathname + targetUrl.search) + '"';
+        }
+      } catch {}
+      return match;
+    }
+  );
+
+  // Step 3: Rewrite absolute domain URLs in JS strings (AJAX, navigation)
   const escaped = hostname.replace(/\./g, '\\.');
   html = html.replace(
     new RegExp(`"https?://${escaped}([^"]*)"`, 'g'),
@@ -142,6 +154,7 @@ function rewriteUrls(html, base, hostname) {
     new RegExp(`'https?://${escaped}([^']*)'`, 'g'),
     (_, path) => "'/api/proxy?url=" + encodeURIComponent(base + path)
   );
+
   return html;
 }
 
