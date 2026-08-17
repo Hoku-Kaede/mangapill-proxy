@@ -2,7 +2,7 @@ export const config = { runtime: 'edge' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const SITE_CSS = {
+const SITE_INJECT = {
   'manhuatop.org': `
     <style id="hide-clutter">
       [class*="share"], [class*="social"], [class*="discord"],
@@ -10,7 +10,82 @@ const SITE_CSS = {
       .yarpp-related, .wp-caption-text {
         display: none !important;
       }
-    </style>`,
+    </style>
+    <script>
+    (function() {
+      var target = 'https://manhuatop.org';
+      var proxyBase = '/api/proxy?url=' + encodeURIComponent(target);
+      var s3proxy = '/api/proxy?url=' + encodeURIComponent('https://s3.manhuatop.org');
+
+      function toProxy(path) {
+        if (!path) return path;
+        if (path.indexOf('/api/proxy') === 0) return path;
+        if (path.indexOf('http') === 0) {
+          try {
+            var u = new URL(path);
+            if (u.hostname === 'manhuatop.org' || u.hostname.endsWith('.manhuatop.org')) {
+              return '/api/proxy?url=' + encodeURIComponent(path);
+            }
+          } catch(e) {}
+          return path;
+        }
+        if (path.indexOf('/') === 0) return proxyBase + encodeURIComponent(path);
+        return path;
+      }
+
+      var origPush = history.pushState;
+      var origReplace = history.replaceState;
+      history.pushState = function() {
+        var a = Array.prototype.slice.call(arguments);
+        if (a[2]) a[2] = toProxy(a[2]);
+        return origPush.apply(this, a);
+      };
+      history.replaceState = function() {
+        var a = Array.prototype.slice.call(arguments);
+        if (a[2]) a[2] = toProxy(a[2]);
+        return origReplace.apply(this, a);
+      };
+
+      document.addEventListener('click', function(e) {
+        var a = e.target.closest('a');
+        if (!a || !a.href) return;
+        try {
+          var url = new URL(a.href, location.href);
+          if (url.origin === location.origin && url.pathname.indexOf('/api/proxy') !== 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            location.href = '/api/proxy?url=' + encodeURIComponent(target + url.pathname + url.search + url.hash);
+          }
+        } catch(ex) {}
+      }, true);
+
+      var origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        if (typeof input === 'string' && input.indexOf('http') === 0) {
+          try {
+            var u = new URL(input);
+            if (u.hostname === 'manhuatop.org' || u.hostname.endsWith('.manhuatop.org')) {
+              input = '/api/proxy?url=' + encodeURIComponent(input);
+            }
+          } catch(e) {}
+        }
+        return origFetch.apply(this, arguments);
+      };
+
+      var origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        if (typeof url === 'string' && url.indexOf('http') === 0) {
+          try {
+            var u = new URL(url);
+            if (u.hostname === 'manhuatop.org' || u.hostname.endsWith('.manhuatop.org')) {
+              arguments[1] = '/api/proxy?url=' + encodeURIComponent(url);
+            }
+          } catch(e) {}
+        }
+        return origOpen.apply(this, arguments);
+      };
+    })();
+    </script>`,
 };
 
 export default async function handler(req) {
@@ -78,7 +153,7 @@ export default async function handler(req) {
     if (isHtml) {
       let html = await upstream.text();
       html = rewriteHtml(html, base, isSameSite, proxyOrigin);
-      const siteCss = SITE_CSS[hostname] || '';
+      const siteCss = SITE_INJECT[hostname] || '';
       if (siteCss) {
         html = injectCss(html, siteCss);
       }
