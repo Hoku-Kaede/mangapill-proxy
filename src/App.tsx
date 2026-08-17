@@ -3,12 +3,13 @@ import { LiveMangaDexReader } from './components/LiveMangaDexReader';
 import { AnimeSection } from './components/AnimeSection';
 import { MoviesSection } from './components/MoviesSection';
 import { SeriesSection } from './components/SeriesSection';
+import { DramaSection } from './components/DramaSection';
 import { BookOpen, Clapperboard, Film, MonitorPlay, Moon, ScrollText, Sun, Tv } from 'lucide-react';
 import { MiraculousSection } from './components/MiraculousSection';
 
 export default function App() {
   const [isDark, setIsDark] = useState<boolean>(true);
-  const [section, setSection] = useState<'manga' | 'manhwa' | 'anime' | 'movies' | 'series' | 'miraculous'>('manga');
+  const [section, setSection] = useState<'manga' | 'manhwa' | 'anime' | 'movies' | 'drama' | 'series' | 'miraculous'>('manga');
 
   return (
     <div className={`h-dvh flex flex-col overflow-hidden ${isDark ? 'dark bg-[#0a0a0a] text-[#e0e0e0]' : 'bg-[#f4f4f5] text-[#18181b]'} transition-colors font-sans antialiased`}>
@@ -74,6 +75,15 @@ export default function App() {
               <span className="hidden sm:inline">Movies</span>
             </button>
             <button
+              onClick={() => setSection('drama')}
+              className={`px-3 py-1.5 rounded-xs transition-colors flex items-center gap-1.5 ${
+                section === 'drama' ? 'bg-white text-black font-bold' : 'text-[#a0a0a0] hover:text-white'
+              }`}
+            >
+              <Tv className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Drama</span>
+            </button>
+            <button
               onClick={() => setSection('series')}
               className={`px-3 py-1.5 rounded-xs transition-colors flex items-center gap-1.5 ${
                 section === 'series' ? 'bg-white text-black font-bold' : 'text-[#a0a0a0] hover:text-white'
@@ -115,6 +125,8 @@ export default function App() {
           <AnimeSection />
         ) : section === 'movies' ? (
           <MoviesSection />
+        ) : section === 'drama' ? (
+          <DramaSection />
         ) : section === 'miraculous' ? (
           <MiraculousSection />
         ) : (
