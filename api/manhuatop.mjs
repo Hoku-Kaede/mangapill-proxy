@@ -73,14 +73,14 @@ function rewriteUrls(html, base) {
     (match, prefix, path, suffix) => {
       if (path.startsWith('//')) return match;
       if (path.startsWith('http://') || path.startsWith('https://')) return match;
-      return prefix + base + path + suffix;
+      return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
     }
   );
   html = html.replace(
     /((?:href|src|action)=)([^"'\s>]+)(?=[\s>])/g,
     (match, prefix, path) => {
       if (path.startsWith('//') || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return match;
-      if (path.startsWith('/')) return prefix + base + path;
+      if (path.startsWith('/')) return prefix + '/api/manhuatop?path=' + encodeURIComponent(path);
       return match;
     }
   );
