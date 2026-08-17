@@ -16,7 +16,7 @@ export function ManhwaSection() {
       </div>
       <div className="flex-1 min-h-0">
         <iframe
-          src="https://manhuatop.org/manga-release-schedule/"
+          src="/api/manhuatop?path=/manga-release-schedule/"
           title="Manhwa"
           className="w-full h-full border-0"
           allow="autoplay; fullscreen"
