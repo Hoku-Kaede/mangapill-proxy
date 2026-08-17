@@ -8,21 +8,24 @@ export default async function handler(req) {
   const path = url.searchParams.get('path') || '/manga-release-schedule/';
   const target = `${BASE}${path}`;
 
+  const fetchOptions = {
+    method: req.method,
+    headers: {
+      'User-Agent': UA,
+      'Accept': req.headers.get('accept') || '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://manhuatop.org/',
+    },
+    redirect: 'follow',
+  };
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    fetchOptions.body = await req.text();
+    fetchOptions.headers['Content-Type'] = req.headers.get('content-type') || 'application/x-www-form-urlencoded';
+  }
+
   try {
-    const upstream = await fetch(target, {
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://manhuatop.org/',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-      },
-      redirect: 'follow',
-    });
+    const upstream = await fetch(target, fetchOptions);
 
     const contentType = upstream.headers.get('content-type') || '';
     const isHtml = contentType.includes('text/html');
@@ -69,7 +72,7 @@ export default async function handler(req) {
 function rewriteUrls(html, base) {
   html = html.replace(
     /((?:href|src|action)=["'])(https?:\/\/manhuatop\.org)(\/[^"']*?)(["'])/g,
-    (match, prefix, origin, path, suffix) => {
+    (match, prefix, _origin, path, suffix) => {
       return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
     }
   );
@@ -89,5 +92,12 @@ function rewriteUrls(html, base) {
       return match;
     }
   );
+  // Rewrite absolute manhuatop.org URLs inside JS strings
+  html = html.replace(/"https?:\/\/manhuatop\.org/g, '"/api/manhuatop?path=');
+  html = html.replace(/'https?:\/\/manhuatop\.org/g, "'/api/manhuatop?path=");
+  html = html.replace(/https?:\\\/\\\/manhuatop\.org/g, '/api/manhuatop?path=');
+  // Fix double-encoded paths
+  html = html.replace(/\/api\/manhuatop\?path=https%3A%2F%2Fmanhuatop\.org/g, '/api/manhuatop?path=');
+  html = html.replace(/\/api\/manhuatop\?path=https:\/\/manhuatop\.org/g, '/api/manhuatop?path=');
   return html;
 }
