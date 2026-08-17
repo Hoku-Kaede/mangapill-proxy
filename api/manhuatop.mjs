@@ -1,11 +1,11 @@
 export const config = { runtime: 'edge' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const BASE = 'https://manhuaplus.com';
+const BASE = 'https://comics.inkr.com';
 
 export default async function handler(req) {
   const url = new URL(req.url);
-  const path = url.searchParams.get('path') || '/';
+  const path = url.searchParams.get('path') || '/manhua';
   const target = `${BASE}${path}`;
 
   const fetchOptions = {
@@ -14,14 +14,14 @@ export default async function handler(req) {
       'User-Agent': UA,
       'Accept': req.headers.get('accept') || '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://manhuaplus.com/',
+      'Referer': 'https://comics.inkr.com/',
     },
     redirect: 'follow',
   };
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     fetchOptions.body = await req.text();
-    fetchOptions.headers['Content-Type'] = req.headers.get('content-type') || 'application/x-www-form-urlencoded';
+    fetchOptions.headers['Content-Type'] = req.headers.get('content-type') || 'application/json';
   }
 
   try {
@@ -71,7 +71,7 @@ export default async function handler(req) {
 
 function rewriteUrls(html, base) {
   html = html.replace(
-    /((?:href|src|action)=["'])(https?:\/\/manhuaplus\.com)(\/[^"']*?)(["'])/g,
+    /((?:href|src|action)=["'])(https?:\/\/comics\.inkr\.com)(\/[^"']*?)(["'])/g,
     (match, prefix, _origin, path, suffix) => {
       return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
     }
@@ -92,12 +92,8 @@ function rewriteUrls(html, base) {
       return match;
     }
   );
-  // Rewrite absolute manhuatop.org URLs inside JS strings
-  html = html.replace(/"https?:\/\/manhuaplus\.com/g, '"/api/manhuatop?path=');
-  html = html.replace(/'https?:\/\/manhuaplus\.com/g, "'/api/manhuatop?path=");
-  html = html.replace(/https?:\\\/\\\/manhuaplus\.com/g, '/api/manhuatop?path=');
-  // Fix double-encoded paths
-  html = html.replace(/\/api\/manhuatop\?path=https%3A%2F%2Fmanhuatop\.org/g, '/api/manhuatop?path=');
-  html = html.replace(/\/api\/manhuatop\?path=https:\/\/manhuatop\.org/g, '/api/manhuatop?path=');
+  html = html.replace(/"https?:\/\/comics\.inkr\.com/g, '"/api/manhuatop?path=');
+  html = html.replace(/'https?:\/\/comics\.inkr\.com/g, "'/api/manhuatop?path=");
+  html = html.replace(/https?:\\\/\\\/comics\.inkr\.com/g, '/api/manhuatop?path=');
   return html;
 }

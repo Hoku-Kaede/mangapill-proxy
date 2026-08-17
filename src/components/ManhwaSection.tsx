@@ -6,7 +6,7 @@ export function ManhwaSection() {
       <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-2 bg-[#0d0d0d] border-b border-white/10">
         <span className="text-[10px] font-bold uppercase tracking-widest text-[#a0a0a0]">Manhwa</span>
         <a
-          href="https://manhuaplus.com"
+          href="https://comics.inkr.com/manhua"
           target="_blank"
           rel="noopener noreferrer"
           className="px-3 py-1 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
