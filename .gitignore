@@ -16,3 +16,5 @@ android/.idea/
 android/app/build/
 android/capacitor-cordova-android-plugins/src/main/assets/
 android/app/src/main/assets/public/
+
+.vercel
