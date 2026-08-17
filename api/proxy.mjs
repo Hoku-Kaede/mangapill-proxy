@@ -1,12 +1,23 @@
 export const config = { runtime: 'edge' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const BASE = 'https://manhuatop.org';
 
 export default async function handler(req) {
   const url = new URL(req.url);
-  const path = url.searchParams.get('path') || '/manga-release-schedule/';
-  const target = `${BASE}${path}`;
+  const target = url.searchParams.get('url');
+
+  if (!target) {
+    return new Response('Missing ?url= param', { status: 400 });
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return new Response('Invalid URL', { status: 400 });
+  }
+
+  const base = parsed.origin;
 
   try {
     const upstream = await fetch(target, {
@@ -14,7 +25,7 @@ export default async function handler(req) {
         'User-Agent': UA,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://manhuatop.org/',
+        'Referer': base + '/',
         'Upgrade-Insecure-Requests': '1',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
@@ -48,7 +59,7 @@ export default async function handler(req) {
     let body;
     if (isHtml) {
       let html = await upstream.text();
-      html = rewriteUrls(html, BASE);
+      html = rewriteUrls(html, base);
       html = injectTheme(html);
       body = new TextEncoder().encode(html);
     } else {
@@ -108,7 +119,7 @@ const THEME_CSS = `
   h1, h2, h3, h4, h5, h6, .entry-title, .post-title, .series-title, .bigtitle, .section-title, .page-title, .tit {
     color: #f5f5f5 !important;
   }
-  p, span, li, td, th, label, input, select, textarea, div, .chapter-date, .chapternum, .chapternum, .eph-num, .chapternum, .listing-chapters_wrap {
+  p, span, li, td, th, label, input, select, textarea, div, .chapter-date, .chapternum, .eph-num, .listing-chapters_wrap {
     color: #c0c0c0 !important;
   }
   nav, header, footer, .navbar, .header, .footer, .sidebar, aside, .site-header, .site-footer, .top-header, .bottom-nav {
@@ -207,9 +218,8 @@ const THEME_CSS = `
 </style>`;
 
 function injectTheme(html) {
-  const styleTag = THEME_CSS;
   if (html.includes('</head>')) {
-    return html.replace('</head>', styleTag + '</head>');
+    return html.replace('</head>', THEME_CSS + '</head>');
   }
-  return styleTag + html;
+  return THEME_CSS + html;
 }
