@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { LiveMangaDexReader } from './components/LiveMangaDexReader';
+import { MangaSection } from './components/MangaSection';
 import { AnimeSection } from './components/AnimeSection';
 import { MoviesSection } from './components/MoviesSection';
 import { SeriesSection } from './components/SeriesSection';
 import { DramaSection } from './components/DramaSection';
-import { BookOpen, Clapperboard, Film, MonitorPlay, Moon, ScrollText, Sun, Tv } from 'lucide-react';
+import { BookOpen, Clapperboard, Film, MonitorPlay, Moon, Sun, Tv } from 'lucide-react';
 import { MiraculousSection } from './components/MiraculousSection';
 
 export default function App() {
   const [isDark, setIsDark] = useState<boolean>(true);
-  const [section, setSection] = useState<'manga' | 'manhwa' | 'anime' | 'movies' | 'drama' | 'series' | 'miraculous'>('manga');
+  const [section, setSection] = useState<'manga' | 'anime' | 'movies' | 'drama' | 'series' | 'miraculous'>('manga');
 
   return (
     <div className={`h-dvh flex flex-col overflow-hidden ${isDark ? 'dark bg-[#0a0a0a] text-[#e0e0e0]' : 'bg-[#f4f4f5] text-[#18181b]'} transition-colors font-sans antialiased`}>
@@ -46,15 +46,6 @@ export default function App() {
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Manga</span>
-            </button>
-            <button
-              onClick={() => setSection('manhwa')}
-              className={`px-3 py-1.5 rounded-xs transition-colors flex items-center gap-1.5 ${
-                section === 'manhwa' ? 'bg-white text-black font-bold' : 'text-[#a0a0a0] hover:text-white'
-              }`}
-            >
-              <ScrollText className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Manhwa</span>
             </button>
             <button
               onClick={() => setSection('anime')}
@@ -118,9 +109,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 min-h-0 overflow-hidden max-w-7xl w-full mx-auto px-4 sm:px-6 py-5">
         {section === 'manga' ? (
-          <LiveMangaDexReader />
-        ) : section === 'manhwa' ? (
-          <LiveMangaDexReader defaultOrigin="manhwa" />
+          <MangaSection />
         ) : section === 'anime' ? (
           <AnimeSection />
         ) : section === 'movies' ? (
