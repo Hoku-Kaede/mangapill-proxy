@@ -1,7 +1,8 @@
 import { useState, useEffect, useId, useRef } from 'react';
 import type { SyntheticEvent } from 'react';
 import { MangaItem, ChapterItem, ChapterPagesData } from '../types';
-import { searchManga, getMangaChapters, getChapterPages, mangaHasEnglishChapters, getMangaSuggestions } from '../services/mangadex';
+import { searchManga, getMangaChapters, getChapterPages, mangaHasEnglishChapters, getMangaSuggestions, getGenreTags } from '../services/mangadex';
+import type { MangaTag } from '../services/mangadex';
 import { searchMangaPill, getMangaPillInfo, getMangaPillChapterPages, resolveMangaPillByTitle } from '../services/consumet';
 import type { MangaOrigin } from '../services/mangadex';
 import { Capacitor } from '@capacitor/core';
@@ -131,6 +132,8 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
   const [hasMore, setHasMore] = useState(false);
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
   const verifyTokenRef = useRef(0);
+  const [genreTags, setGenreTags] = useState<MangaTag[]>([]);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedManga, setSelectedManga] = useState<MangaItem | null>(null);
   const [chapters, setChapters] = useState<ChapterItem[]>([]);
   const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
@@ -168,7 +171,7 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
   useEffect(() => {
     (async () => {
       try {
-        const suggestions = await getMangaSuggestions(18, 0, defaultOrigin);
+        const suggestions = await getMangaSuggestions(18, 0, defaultOrigin, selectedGenres);
         setMangaList(suggestions);
       } catch (err) {
         console.error('[Reader] Failed to load suggestions:', err);
@@ -177,12 +180,17 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
     })();
   }, [defaultOrigin]);
 
+  // Load genre tags once.
+  useEffect(() => {
+    getGenreTags().then(setGenreTags).catch(() => {});
+  }, []);
+
   // Re-run the current view when the translated-search toggle, origin filter,
-  // or source toggle changes (search stays active, suggestions reload when browsing).
+  // source toggle, or genre filter changes.
   useEffect(() => {
     void handleSearch(query, translatedSearch, originFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [translatedSearch, originFilter, searchSource]);
+  }, [translatedSearch, originFilter, searchSource, selectedGenres]);
 
   const toggleFavorite = (id: string) => {
     setFavorites(prev => {
@@ -224,6 +232,7 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
     setSearchError('');
     const pageSize = 18;
     const currentList = mangaList;
+    const tagIds = selectedGenres;
     try {
       if (searchSource === 'mangapill') {
         if (!searchTerm.trim()) {
@@ -243,8 +252,8 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
       }
       const nextOffset = loadMore ? currentList.length : 0;
       const results = searchTerm.trim()
-        ? await searchManga(searchTerm, pageSize, translated, nextOffset, origin)
-        : await getMangaSuggestions(pageSize, nextOffset, origin);
+        ? await searchManga(searchTerm, pageSize, translated, nextOffset, origin, tagIds)
+        : await getMangaSuggestions(pageSize, nextOffset, origin, tagIds);
       if (loadMore) {
         setMangaList([...currentList, ...results]);
         verifyChapterAvailability(results);
@@ -1013,6 +1022,40 @@ export function LiveMangaDexReader({ defaultOrigin = 'all' }: { defaultOrigin?: 
               }`}
             >
               {label}
+            </button>
+          ))}
+        </div>
+        )}
+
+        {/* Genre Filter - MangaDex only */}
+        {searchSource === 'mangadex' && genreTags.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-4 mb-2">
+          <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#808080] flex items-center gap-1 mr-1 whitespace-nowrap">
+            <Layers className="w-3 h-3 text-red-500" /> Genre
+          </span>
+          {selectedGenres.length > 0 && (
+            <button
+              onClick={() => setSelectedGenres([])}
+              className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-xs border transition-colors whitespace-nowrap bg-red-600/20 border-red-500/40 text-red-400"
+            >
+              Clear
+            </button>
+          )}
+          {genreTags.slice(0, 20).map((tag) => (
+            <button
+              key={tag.id}
+              onClick={() => {
+                setSelectedGenres((prev) =>
+                  prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
+                );
+              }}
+              className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-xs border transition-colors whitespace-nowrap ${
+                selectedGenres.includes(tag.id)
+                  ? 'bg-red-600 border-red-500 text-white'
+                  : 'bg-white/5 border-white/10 text-[#a0a0a0] hover:text-white hover:border-red-500'
+              }`}
+            >
+              {tag.name}
             </button>
           ))}
         </div>

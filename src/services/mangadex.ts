@@ -49,6 +49,54 @@ const WEBTOON_TAG_NAMES = ['Web Comic', 'Long Strip'];
 let webtoonTagIds: string[] | null = null;
 let webtoonTagFetch: Promise<string[]> | null = null;
 
+export interface MangaTag {
+  id: string;
+  name: string;
+}
+
+// Popular genre tags to surface in the UI (MangaDex tag names).
+const POPULAR_GENRE_NAMES = [
+  'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror',
+  'Mystery', 'Romance', 'Sci-Fi', 'Slice of Life', 'Supernatural',
+  'Thriller', 'Psychological', 'Martial Arts', 'Mecha', 'Sports',
+  'Tragedy', 'Historical', 'Medical', 'Cooking',
+];
+
+let allTagsCache: MangaTag[] | null = null;
+let allTagsFetch: Promise<MangaTag[]> | null = null;
+
+export async function getAllMangaTags(): Promise<MangaTag[]> {
+  if (allTagsCache) return allTagsCache;
+  if (!allTagsFetch) {
+    allTagsFetch = (async () => {
+      const res = await mdFetch(apiUrl('/manga/tag'));
+      const json = await res.json();
+      const tags: MangaTag[] = [];
+      for (const t of json?.data || []) {
+        const name = localizedTagName(t);
+        if (name && t?.id) tags.push({ id: t.id, name });
+      }
+      allTagsCache = tags;
+      return tags;
+    })().catch(() => {
+      allTagsCache = [];
+      return allTagsCache;
+    });
+  }
+  return allTagsFetch;
+}
+
+/** Returns a filtered list of genre tags suitable for UI display. */
+export async function getGenreTags(): Promise<MangaTag[]> {
+  const all = await getAllMangaTags();
+  // Return popular genres first (if found), then remaining genres alphabetically.
+  const popular = all.filter((t) => POPULAR_GENRE_NAMES.includes(t.name));
+  const rest = all
+    .filter((t) => !POPULAR_GENRE_NAMES.includes(t.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [...popular, ...rest];
+}
+
 async function loadWebtoonTagIds(): Promise<string[]> {
   if (webtoonTagIds) return webtoonTagIds;
   if (!webtoonTagFetch) {
@@ -209,7 +257,8 @@ const COMMON_PARAMS = [
 export async function getMangaSuggestions(
   limit: number = 18,
   offset: number = 0,
-  origin: MangaOrigin = 'all'
+  origin: MangaOrigin = 'all',
+  tagIds: string[] = []
 ): Promise<MangaItem[]> {
   const params = new URLSearchParams();
   params.set('limit', String(limit));
@@ -221,6 +270,7 @@ export async function getMangaSuggestions(
   });
   const originParams = await originFilterParams(origin);
   originParams.forEach((v, k) => params.append(k, v));
+  tagIds.forEach((id) => params.append('includedTags[]', id));
   const res = await mdFetch(apiUrl(`/manga?${params.toString()}`));
   const json = await res.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,7 +282,8 @@ export async function searchManga(
   limit: number = 18,
   translatedSearch: boolean = true,
   offset: number = 0,
-  origin: MangaOrigin = 'all'
+  origin: MangaOrigin = 'all',
+  tagIds: string[] = []
 ): Promise<MangaItem[]> {
   const params = new URLSearchParams();
   if (query.trim()) params.set('title', query.trim());
@@ -245,6 +296,7 @@ export async function searchManga(
   });
   const originParams = await originFilterParams(origin);
   originParams.forEach((v, k) => params.append(k, v));
+  tagIds.forEach((id) => params.append('includedTags[]', id));
   const res = await mdFetch(apiUrl(`/manga?${params.toString()}`));
   const json = await res.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

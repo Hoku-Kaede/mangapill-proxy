@@ -11,6 +11,8 @@ import {
   buildMovieServers,
   pickBestMovieServer,
   getActiveMovieServerId,
+  getMoviesByGenre,
+  TMDB_GENRES,
 } from '../services/movies';
 
 export function MoviesSection() {
@@ -27,6 +29,7 @@ export function MoviesSection() {
   const [statuses, setStatuses] = useState<ServerStatus[] | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [selectedGenre, setSelectedGenre] = useState<number | null>(null);
 
   // Load the trending feed when the section opens.
   useEffect(() => {
@@ -43,9 +46,24 @@ export function MoviesSection() {
     })();
   }, []);
 
+  // Re-fetch when genre changes.
+  useEffect(() => {
+    if (selectedGenre === null) return;
+    setLoading(true);
+    setError('');
+    getMoviesByGenre(selectedGenre, 24)
+      .then((list) => setResults(list))
+      .catch((err) => {
+        console.error('[Movies] genre fetch failed:', err);
+        setError('Could not load movies for this genre.');
+      })
+      .finally(() => setLoading(false));
+  }, [selectedGenre]);
+
   const handleSearch = async (term: string = query) => {
     setLoading(true);
     setError('');
+    setSelectedGenre(null);
     try {
       const list = term.trim()
         ? await searchMovies(term, 24)
@@ -67,7 +85,7 @@ export function MoviesSection() {
     setActiveServerId(null);
     setDetailLoading(true);
     try {
-      const details = await getMovieDetails(movie.id);
+      const details = await getMovieDetails(movie.id, movie.tmdbId);
       setSelected({ ...movie, ...details, id: movie.id });
     } catch (err) {
       console.error('[Movies] detail fetch failed:', err);
@@ -285,6 +303,34 @@ export function MoviesSection() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        {/* Genre Filter */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-4 mb-2">
+          <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#808080] flex items-center gap-1 mr-1 whitespace-nowrap">
+            <Clapperboard className="w-3 h-3 text-red-500" /> Genre
+          </span>
+          {selectedGenre !== null && (
+            <button
+              onClick={() => setSelectedGenre(null)}
+              className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-xs border transition-colors whitespace-nowrap bg-red-600/20 border-red-500/40 text-red-400"
+            >
+              All
+            </button>
+          )}
+          {TMDB_GENRES.map((genre) => (
+            <button
+              key={genre.id}
+              onClick={() => setSelectedGenre(selectedGenre === genre.id ? null : genre.id)}
+              className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-xs border transition-colors whitespace-nowrap ${
+                selectedGenre === genre.id
+                  ? 'bg-red-600 border-red-500 text-white'
+                  : 'bg-white/5 border-white/10 text-[#a0a0a0] hover:text-white hover:border-red-500'
+              }`}
+            >
+              {genre.name}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-[#a0a0a0]">
             <RefreshCw className="w-8 h-8 animate-spin text-red-500" />

@@ -31,7 +31,131 @@ export interface ServerStatus extends MovieServer {
 }
 
 const CINEMETA = 'https://v3-cinemeta.strem.io';
+const TMDB_PROXY = '/api/tmdb';
 const PROBE_TIMEOUT_MS = 8000;
+
+// Known franchise keyword mappings for TMDB discover (keyword_id → display name).
+// When a search matches one of these, we fetch the full collection sorted by
+// release date so the user sees the correct storyline order.
+const FRANCHISE_KEYWORDS: Record<string, { keywordId: string; label: string; collectionId?: string }> = {
+  'marvel': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'mcu': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'avengers': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'spider-man': { keywordId: '4195', label: 'Spider-Man' },
+  'spiderman': { keywordId: '4195', label: 'Spider-Man' },
+  'batman': { keywordId: '825', label: 'Batman' },
+  'dc': { keywordId: '179430', label: 'DC Universe' },
+  'star wars': { keywordId: '1', label: 'Star Wars', collectionId: '10' },
+  'fast and furious': { keywordId: '42782', label: 'Fast & Furious' },
+  'fast & furious': { keywordId: '42782', label: 'Fast & Furious' },
+  'jurassic': { keywordId: '58771', label: 'Jurassic Park', collectionId: '342' },
+  'harry potter': { keywordId: '851', label: 'Harry Potter', collectionId: '1241' },
+  'lord of the rings': { keywordId: '12179', label: 'Lord of the Rings', collectionId: '119' },
+  'hobbit': { keywordId: '12179', label: 'Lord of the Rings', collectionId: '119' },
+  'pixar': { keywordId: '3955', label: 'Pixar' },
+  'disney': { keywordId: '3955', label: 'Disney' },
+  'transformers': { keywordId: '9076', label: 'Transformers' },
+  'mission impossible': { keywordId: '6360', label: 'Mission: Impossible' },
+  'x-men': { keywordId: '3936', label: 'X-Men' },
+  'xmen': { keywordId: '3936', label: 'X-Men' },
+  'iron man': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'thor': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'captain america': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'guardians': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'ant-man': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'black panther': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'doctor strange': { keywordId: '180319', label: 'Marvel Cinematic Universe', collectionId: '115651' },
+  'superman': { keywordId: '179430', label: 'DC Universe' },
+  'wonder woman': { keywordId: '179430', label: 'DC Universe' },
+  'aquaman': { keywordId: '179430', label: 'DC Universe' },
+  'the flash': { keywordId: '179430', label: 'DC Universe' },
+  'dark knight': { keywordId: '825', label: 'Batman' },
+  'matrix': { keywordId: '6624', label: 'The Matrix' },
+  'indiana jones': { keywordId: '568', label: 'Indiana Jones' },
+  'toy story': { keywordId: '3955', label: 'Pixar' },
+  'shrek': { keywordId: '4064', label: 'Shrek' },
+  'die hard': { keywordId: '10793', label: 'Die Hard' },
+  'alien': { keywordId: '787', label: 'Alien' },
+  'predator': { keywordId: '348', label: 'Predator' },
+  'terminator': { keywordId: '559', label: 'Terminator' },
+  'rocky': { keywordId: '228', label: 'Rocky' },
+  'rambo': { keywordId: '228', label: 'Rocky' },
+  'hunger games': { keywordId: '10290', label: 'Hunger Games' },
+  'twilight': { keywordId: '2215', label: 'Twilight' },
+  'dune': { keywordId: '2347', label: 'Dune' },
+};
+
+function detectFranchise(query: string): { keywordId: string; label: string; collectionId?: string } | null {
+  const q = query.toLowerCase().trim();
+  // Exact match first
+  if (FRANCHISE_KEYWORDS[q]) return FRANCHISE_KEYWORDS[q];
+  // Word-boundary match: query contains the key as a whole word
+  for (const [key, val] of Object.entries(FRANCHISE_KEYWORDS)) {
+    const re = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (re.test(q)) return val;
+  }
+  return null;
+}
+
+async function tmdbFetch(path: string): Promise<any> {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`TMDB error: ${res.status}`);
+  return res.json();
+}
+
+// Fetch trending movies from TMDB (used for franchise + fallback)
+export async function getTmdbTrending(limit: number = 24): Promise<MovieItem[]> {
+  const json = await tmdbFetch(`${TMDB_PROXY}?action=trending&page=1`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (json?.results || []).map(tmdbMapMovie).filter((m: MovieItem) => m.title).slice(0, limit);
+}
+
+// TMDB genre ID mapping for the genre filter UI.
+export const TMDB_GENRES: { id: number; name: string }[] = [
+  { id: 28, name: 'Action' },
+  { id: 12, name: 'Adventure' },
+  { id: 16, name: 'Animation' },
+  { id: 35, name: 'Comedy' },
+  { id: 80, name: 'Crime' },
+  { id: 18, name: 'Drama' },
+  { id: 10751, name: 'Family' },
+  { id: 14, name: 'Fantasy' },
+  { id: 36, name: 'History' },
+  { id: 27, name: 'Horror' },
+  { id: 10402, name: 'Music' },
+  { id: 9648, name: 'Mystery' },
+  { id: 10749, name: 'Romance' },
+  { id: 878, name: 'Sci-Fi' },
+  { id: 53, name: 'Thriller' },
+  { id: 10752, name: 'War' },
+  { id: 37, name: 'Western' },
+];
+
+// Fetch movies by TMDB genre (sorted by popularity).
+export async function getMoviesByGenre(genreId: number, limit: number = 24): Promise<MovieItem[]> {
+  const json = await tmdbFetch(
+    `${TMDB_PROXY}?action=discover&page=1&with_genres=${genreId}&sort_by=popularity.desc`
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (json?.results || []).map(tmdbMapMovie).filter((m: MovieItem) => m.title).slice(0, limit);
+}
+
+function tmdbMapMovie(dto: any): MovieItem {
+  const tmdbId = String(dto?.id || '');
+  return {
+    id: String(dto?.imdb_id || ''),
+    tmdbId,
+    title: String(dto?.title || 'Untitled'),
+    description: String(dto?.overview || 'No description available.'),
+    coverUrl: dto?.poster_path ? `https://image.tmdb.org/t/p/w500${dto.poster_path}` : '',
+    backgroundUrl: dto?.backdrop_path ? `https://image.tmdb.org/t/p/w780${dto.backdrop_path}` : undefined,
+    year: dto?.release_date ? dto.release_date.slice(0, 4) : '',
+    rating: dto?.vote_average ? String(dto.vote_average) : '',
+    genres: [],
+    cast: [],
+    director: [],
+  };
+}
 
 // Upgrade small/low-res metahub artwork so the grid and detail view look sharp.
 function upgradeArtwork(url: string, kind: 'poster' | 'background'): string {
@@ -81,6 +205,58 @@ export async function getPopularMovies(limit: number = 24): Promise<MovieItem[]>
 }
 
 export async function searchMovies(query: string, limit: number = 24): Promise<MovieItem[]> {
+  const franchise = detectFranchise(query);
+
+  // If a known franchise is detected, try collection endpoint first, then multi-page search
+  if (franchise) {
+    try {
+      // Strategy 1: If we have a collection ID, fetch the whole collection (best for MCU, Star Wars, etc.)
+      if (franchise.collectionId) {
+        const colJson = await tmdbFetch(`${TMDB_PROXY}?action=collection&id=${franchise.collectionId}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let colList: MovieItem[] = (colJson?.parts || [])
+          .filter((m: any) => m.release_date && m.media_type !== 'tv')
+          .map(tmdbMapMovie)
+          .filter((m: MovieItem) => m.title);
+        colList.sort((a, b) => (parseInt(a.year) || 9999) - (parseInt(b.year) || 9999));
+        if (colList.length > 0) return colList;
+      }
+
+      // Strategy 2: Multi-page TMDB search — fetch up to 5 pages (100 results)
+      const searchTerm = franchise.label.replace('Cinematic Universe', '').replace('Universe', '').trim();
+      const allResults: any[] = [];
+      for (let pg = 1; pg <= 5; pg++) {
+        const json = await tmdbFetch(`${TMDB_PROXY}?action=search&q=${encodeURIComponent(searchTerm)}&page=${pg}`);
+        const results = json?.results || [];
+        allResults.push(...results);
+        // Stop early if no more results
+        if (results.length < 20) break;
+      }
+
+      let list: MovieItem[] = allResults
+        .filter((m: any) => m.release_date && m.media_type !== 'tv')
+        .map(tmdbMapMovie)
+        .filter((m: MovieItem) => m.title);
+
+      // Deduplicate by title + year
+      const seen = new Set<string>();
+      list = list.filter((m) => {
+        const key = `${m.title}|${m.year}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Sort by release date (oldest first = chronological storyline order)
+      list.sort((a, b) => (parseInt(a.year) || 9999) - (parseInt(b.year) || 9999));
+
+      if (list.length > 0) return list;
+    } catch {
+      // Fall through to Cinemeta
+    }
+  }
+
+  // Default: Cinemeta search
   const q = encodeURIComponent(query.trim());
   const json = await cinemeta(`/catalog/movie/top/search=${q}.json`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,7 +266,34 @@ export async function searchMovies(query: string, limit: number = 24): Promise<M
   return list.slice(0, limit);
 }
 
-export async function getMovieDetails(id: string): Promise<MovieItem> {
+export async function getMovieDetails(id: string, tmdbId?: string): Promise<MovieItem> {
+  // If we have a tmdbId, try TMDB first to get full details + IMDb ID for embeds
+  if (tmdbId) {
+    try {
+      const json = await tmdbFetch(`${TMDB_PROXY}?action=movie&id=${tmdbId}`);
+      const m = json?.movie || json;
+      const imdbId = m?.external_ids?.imdb_id || '';
+      return {
+        id: imdbId || String(m?.imdb_id || ''),
+        tmdbId: String(m?.id || tmdbId),
+        title: String(m?.title || 'Untitled'),
+        description: String(m?.overview || 'No description available.'),
+        coverUrl: m?.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : '',
+        backgroundUrl: m?.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : undefined,
+        year: m?.release_date ? m.release_date.slice(0, 4) : '',
+        rating: m?.vote_average ? String(m.vote_average) : '',
+        genres: (m?.genres || []).map((g: any) => String(g.name || '')),
+        cast: [],
+        director: (m?.credits?.crew || []).filter((c: any) => c.job === 'Director').map((c: any) => c.name),
+        runtime: m?.runtime ? String(m.runtime) : undefined,
+        country: m?.production_countries?.[0]?.name ? String(m.production_countries[0].name) : undefined,
+      };
+    } catch {
+      // Fall through to Cinemeta
+    }
+  }
+
+  // Default: Cinemeta
   const json = await cinemeta(`/meta/movie/${encodeURIComponent(id)}.json`);
   const meta = json?.meta;
   if (!meta) throw new Error('Movie details not found');

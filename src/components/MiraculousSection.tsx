@@ -131,7 +131,16 @@ export function MiraculousSection() {
               className="group text-left flex flex-col rounded-xs overflow-hidden border border-white/10 bg-white/5 hover:border-red-500/60 hover:bg-white/10 transition-all"
             >
               <div className="relative aspect-video overflow-hidden bg-[#141414]">
-                <div className="w-full h-full flex items-center justify-center">
+                {ep.thumbnail ? (
+                  <img
+                    src={ep.thumbnail}
+                    alt={ep.title}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : null}
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900/40 to-purple-900/30">
                   <Play className="w-8 h-8 text-red-500 opacity-60 group-hover:opacity-100 transition-opacity" />
                 </div>
                 <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 text-[9px] font-bold bg-black/70 backdrop-blur rounded-xs text-white">
