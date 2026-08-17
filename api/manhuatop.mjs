@@ -69,6 +69,12 @@ export default async function handler(req) {
 
 function rewriteUrls(html, base) {
   html = html.replace(
+    /((?:href|src|action)=["'])(https?:\/\/manhuatop\.org)(\/[^"']*?)(["'])/g,
+    (match, prefix, origin, path, suffix) => {
+      return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
+    }
+  );
+  html = html.replace(
     /((?:href|src|action)=["'])(\/[^"']*?)(["'])/g,
     (match, prefix, path, suffix) => {
       if (path.startsWith('//')) return match;
