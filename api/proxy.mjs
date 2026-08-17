@@ -7,14 +7,7 @@ const SITE_CSS = {
     <style id="hide-clutter">
       [class*="share"], [class*="social"], [class*="discord"],
       [class*="report"], footer, [class*="footer"],
-      .yarpp-related, .wp-caption-text, .wp-block-image {
-        display: none !important;
-      }
-    </style>`,
-  'vortexscans.org': `
-    <style id="hide-share-footer">
-      [class*="share"], [class*="social"], [class*="discord"],
-      [class*="report"], footer, [class*="footer"] {
+      .yarpp-related, .wp-caption-text {
         display: none !important;
       }
     </style>`,
@@ -38,6 +31,8 @@ export default async function handler(req) {
   const base = parsed.origin;
   const hostname = parsed.hostname;
   const proxyOrigin = url.origin;
+
+  const isSameSite = (h) => h === hostname || h.endsWith('.' + hostname);
 
   const fetchOptions = {
     method: req.method,
@@ -82,7 +77,7 @@ export default async function handler(req) {
     let body;
     if (isHtml) {
       let html = await upstream.text();
-      html = rewriteHtml(html, base, hostname, proxyOrigin);
+      html = rewriteHtml(html, base, isSameSite, proxyOrigin);
       const siteCss = SITE_CSS[hostname] || '';
       if (siteCss) {
         html = injectCss(html, siteCss);
@@ -90,7 +85,7 @@ export default async function handler(req) {
       body = new TextEncoder().encode(html);
     } else if (isJs) {
       let js = await upstream.text();
-      js = rewriteJs(js, base, hostname, proxyOrigin);
+      js = rewriteJs(js, base, isSameSite, proxyOrigin);
       body = new TextEncoder().encode(js);
     } else {
       body = await upstream.arrayBuffer();
@@ -108,8 +103,8 @@ export default async function handler(req) {
   }
 }
 
-function rewriteHtml(html, base, hostname, proxyOrigin) {
-  // Rewrite all href attributes to go through proxy
+function rewriteHtml(html, base, isSameSite, proxyOrigin) {
+  // Rewrite all href attributes
   html = html.replace(
     /href=["']((?:https?:\/\/)?[^"']*?)["']/gi,
     (match, val) => {
@@ -123,10 +118,9 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
         } else if (val.startsWith('/')) {
           targetUrl = new URL(base + val);
         } else {
-          // relative path like "page.html"
           return match;
         }
-        if (targetUrl.hostname === hostname) {
+        if (isSameSite(targetUrl.hostname)) {
           const full = targetUrl.origin + targetUrl.pathname + targetUrl.search + targetUrl.hash;
           return 'href="' + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full) + '"';
         }
@@ -135,7 +129,7 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
     }
   );
 
-  // Rewrite all src attributes to go through proxy
+  // Rewrite all src attributes
   html = html.replace(
     /src=["']((?:https?:\/\/)?[^"']*?)["']/gi,
     (match, val) => {
@@ -151,7 +145,7 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
         } else {
           return match;
         }
-        if (targetUrl.hostname === hostname) {
+        if (isSameSite(targetUrl.hostname)) {
           const full = targetUrl.origin + targetUrl.pathname + targetUrl.search;
           return 'src="' + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full) + '"';
         }
@@ -176,7 +170,7 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
             } else {
               return urlMatch;
             }
-            if (targetUrl.hostname === hostname) {
+            if (isSameSite(targetUrl.hostname)) {
               const full = targetUrl.origin + targetUrl.pathname + targetUrl.search;
               return proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full);
             }
@@ -201,7 +195,7 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
         } else {
           return match;
         }
-        if (targetUrl.hostname === hostname) {
+        if (isSameSite(targetUrl.hostname)) {
           const full = targetUrl.origin + targetUrl.pathname + targetUrl.search;
           return 'action="' + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full) + '"';
         }
@@ -223,7 +217,7 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
         } else {
           return match;
         }
-        if (targetUrl.hostname === hostname) {
+        if (isSameSite(targetUrl.hostname)) {
           const full = targetUrl.origin + targetUrl.pathname + targetUrl.search;
           return 'url(' + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(full) + ')';
         }
@@ -232,65 +226,45 @@ function rewriteHtml(html, base, hostname, proxyOrigin) {
     }
   );
 
-  // Rewrite window.location and location.href assignments
-  const esc = hostname.replace(/\./g, '\\.');
-  html = html.replace(
-    new RegExp(`(window\\.location(?:\\.href)?\\s*=\\s*['"])https?://${esc}([^'"]*)['"]`, 'g'),
-    (_, prefix, path) => prefix + proxyOrigin + '/api/proxy?url=' + encodeURIComponent(base + path) + '"'
-  );
-
   return html;
 }
 
-function rewriteJs(js, base, hostname, proxyOrigin) {
+function rewriteJs(js, base, isSameSite, proxyOrigin) {
   const proxyBase = proxyOrigin + '/api/proxy?url=';
 
-  // Rewrite ES module relative imports: from"./foo" from'./foo'
+  // Rewrite relative imports: from"./foo" from'./foo'
   js = js.replace(
     /\bfrom\s*["'](\.{1,2}\/[^"']+)["']/g,
     (match, relPath) => {
       const fullUrl = base + '/' + relPath;
-      const proxyUrl = proxyBase + encodeURIComponent(fullUrl);
-      return match.replace(relPath, proxyUrl);
+      return match.replace(relPath, proxyBase + encodeURIComponent(fullUrl));
     }
   );
 
-  // Rewrite dynamic imports: import("./foo") import('./foo')
+  // Rewrite dynamic imports: import("./foo")
   js = js.replace(
     /\bimport\s*\(\s*["'](\.{1,2}\/[^"']+)["']\s*\)/g,
     (match, relPath) => {
       const fullUrl = base + '/' + relPath;
-      const proxyUrl = proxyBase + encodeURIComponent(fullUrl);
-      return match.replace(relPath, proxyUrl);
+      return match.replace(relPath, proxyBase + encodeURIComponent(fullUrl));
     }
   );
 
-  // Rewrite absolute path imports: from"/foo" from'/foo'
+  // Rewrite absolute path imports: from"/foo"
   js = js.replace(
     /\bfrom\s*["'](\/[^"']+)["']/g,
     (match, absPath) => {
       const fullUrl = base + absPath;
-      const proxyUrl = proxyBase + encodeURIComponent(fullUrl);
-      return match.replace(absPath, proxyUrl);
+      return match.replace(absPath, proxyBase + encodeURIComponent(fullUrl));
     }
   );
 
-  // Rewrite dynamic imports with absolute paths: import("/foo") import('/foo')
+  // Rewrite dynamic imports with absolute paths: import("/foo")
   js = js.replace(
     /\bimport\s*\(\s*["'](\/[^"']+)["']\s*\)/g,
     (match, absPath) => {
       const fullUrl = base + absPath;
-      const proxyUrl = proxyBase + encodeURIComponent(fullUrl);
-      return match.replace(absPath, proxyUrl);
-    }
-  );
-
-  // Rewrite fetch() and XMLHttpRequest URLs
-  js = js.replace(
-    new RegExp(`["']https?://${hostname.replace(/\./g, '\\.')}/([^"']*)["']`, 'g'),
-    (match, path) => {
-      const fullUrl = base + '/' + path;
-      return '"' + proxyBase + encodeURIComponent(fullUrl) + '"';
+      return match.replace(absPath, proxyBase + encodeURIComponent(fullUrl));
     }
   );
 
