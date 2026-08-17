@@ -24,8 +24,10 @@ import {
   AnimeItem,
   AnimeEpisode,
   EpisodeStream,
+  EpisodeSubtitle,
   VideoSource,
   HostStatus,
+  StreamServerMeta,
   getAnimeSuggestions,
   searchAnime,
   getAnimeEpisodes,
@@ -37,18 +39,57 @@ import {
   setCustomStreamHost,
   testStreamingHosts,
   getActiveStreamHost,
+  warmAnixo,
+  listEpisodeServers,
+  resolveEpisodeServer,
 } from '../services/anime';
 
 interface AnimePlayerProps {
   url: string;
   title: string;
+  subtitles: EpisodeSubtitle[];
   onFatalError: () => void;
 }
 
-function AnimePlayer({ url, title, onFatalError }: AnimePlayerProps) {
+function AnimePlayer({ url, title, subtitles, onFatalError }: AnimePlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const fatalRef = useRef(onFatalError);
   fatalRef.current = onFatalError;
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Cross-origin <track> loading is unreliable in some browsers, so the VTT
+  // files are fetched here and re-exposed as same-origin blob URLs.
+  const [tracks, setTracks] = useState<{ src: string; label: string; lang: string; isDefault: boolean }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+    setTracks([]);
+    const timer = setTimeout(() => {
+      (async () => {
+        const loaded: { src: string; label: string; lang: string; isDefault: boolean }[] = [];
+        for (const s of subtitles) {
+          try {
+            const res = await fetch(s.file);
+            if (!res.ok) continue;
+            const text = await res.text();
+            const src = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
+            urls.push(src);
+            loaded.push({ src, label: s.label || 'English', lang: s.language || 'en', isDefault: !!s.isDefault });
+          } catch {
+            // skip tracks that fail to load
+          }
+        }
+        if (!cancelled) setTracks(loaded);
+      })();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [subtitles]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -93,16 +134,68 @@ function AnimePlayer({ url, title, onFatalError }: AnimePlayerProps) {
     };
   }, [url]);
 
+  // Track fullscreen state changes
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(
+        !!document.fullscreenElement || !!(document as any).webkitFullscreenElement
+      );
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const fs = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (fs) {
+      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    } else {
+      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+    }
+  };
+
   return (
-    <div className="bg-black w-full flex items-center justify-center">
+    <div ref={containerRef} className="bg-black w-full flex items-center justify-center relative group">
       <video
         ref={videoRef}
         controls
         playsInline
         autoPlay
-        className="w-full max-h-[65vh] object-contain"
+        className={`w-full object-contain ${isFullscreen ? 'h-screen' : 'max-h-[65vh]'}`}
         aria-label={title}
-      />
+      >
+        {tracks.map((t, i) => (
+          <track
+            key={t.src}
+            kind="subtitles"
+            src={t.src}
+            srcLang={t.lang}
+            label={t.label}
+            default={t.isDefault || (i === 0 && tracks.length === 1)}
+          />
+        ))}
+      </video>
+      <button
+        onClick={toggleFullscreen}
+        className="absolute bottom-14 right-3 p-2 bg-black/60 hover:bg-black/80 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        aria-label="Toggle fullscreen"
+      >
+        {isFullscreen ? (
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 4.5H4.5M9 4.5l5.1 5.1M15 9v4.5M15 13.5H19.5M15 13.5l-5.1-5.1M9 15v4.5M9 19.5H4.5M9 19.5l5.1-5.1M15 15v4.5M15 19.5H19.5M15 19.5l-5.1-5.1" />
+          </svg>
+        ) : (
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 }
@@ -249,8 +342,15 @@ export function AnimeSection() {
   const [activeSource, setActiveSource] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
 
+  // Multi-server state
+  const [servers, setServers] = useState<StreamServerMeta[]>([]);
+  const [activeServerId, setActiveServerId] = useState<string | null>(null);
+  const [audioType, setAudioType] = useState<'sub' | 'dub'>('sub');
+  const [resolvingServer, setResolvingServer] = useState(false);
+
   // Load the Trending feed when the app opens.
   useEffect(() => {
+    warmAnixo();
     (async () => {
       try {
         const list = await getAnimeSuggestions(18);
@@ -285,7 +385,11 @@ export function AnimeSection() {
     setPlaying(null);
     setStream(null);
     setStreamError('');
+    setServers([]);
+    setActiveServerId(null);
+    setAudioType('sub');
     setEpisodes(getAnimeEpisodes(anime));
+    warmAnixo();
     try {
       const real = await getAnixoEpisodes(anime.id);
       if (real.length > 0) setEpisodes(real);
@@ -301,14 +405,93 @@ export function AnimeSection() {
     setStreamError('');
     setActiveSource(0);
     setLoadingStream(true);
+    setServers([]);
+    setActiveServerId(null);
+    setResolvingServer(false);
+
     try {
-      const result = await getEpisodeStream(selected.title, episode.number, selected.id);
-      setStream(result);
+      // Fetch available servers from AniVault
+      const serverList = await listEpisodeServers(selected.title, episode.number, selected.id);
+      setServers(serverList);
+
+      // Resolve the first available server
+      if (serverList.length > 0) {
+        const best = serverList[0];
+        setActiveServerId(best.id);
+        setResolvingServer(true);
+        try {
+          const result = await resolveEpisodeServer(best, selected.title, episode.number, selected.id);
+          setStream(result);
+        } catch (err) {
+          console.error('[Anime] server resolve failed:', err);
+          // Fall back to the default getEpisodeStream
+          const result = await getEpisodeStream(selected.title, episode.number, selected.id);
+          setStream(result);
+        } finally {
+          setResolvingServer(false);
+        }
+      } else {
+        // No AniVault servers, use the default path
+        const result = await getEpisodeStream(selected.title, episode.number, selected.id);
+        setStream(result);
+      }
     } catch (err) {
       console.error('[Anime] stream fetch failed:', err);
       setStreamError(err instanceof Error ? err.message : 'Could not load a stream for this episode.');
     } finally {
       setLoadingStream(false);
+    }
+  };
+
+  const handleServerSwitch = async (server: StreamServerMeta) => {
+    if (!selected || !playing || server.id === activeServerId) return;
+    setActiveServerId(server.id);
+    setStream(null);
+    setStreamError('');
+    setResolvingServer(true);
+    try {
+      const result = await resolveEpisodeServer(server, selected.title, playing.number, selected.id);
+      setStream(result);
+    } catch (err) {
+      console.error('[Anime] server switch failed:', err);
+      setStreamError(err instanceof Error ? err.message : 'Failed to load this server.');
+    } finally {
+      setResolvingServer(false);
+    }
+  };
+
+  const handleAudioToggle = async (type: 'sub' | 'dub') => {
+    if (type === audioType || !selected || !playing) return;
+    setAudioType(type);
+    setStreamError('');
+
+    // Filter existing servers by the new audio type
+    const matching = servers.filter((s) => s.category === type);
+    if (matching.length > 0) {
+      const best = matching[0];
+      setActiveServerId(best.id);
+      setResolvingServer(true);
+      try {
+        const result = await resolveEpisodeServer(best, selected.title, playing.number, selected.id);
+        setStream(result);
+      } catch (err) {
+        setStreamError(err instanceof Error ? err.message : 'Failed to load stream.');
+      } finally {
+        setResolvingServer(false);
+      }
+    } else {
+      // No servers for this audio type, try the default path
+      setActiveServerId(null);
+      setStream(null);
+      setLoadingStream(true);
+      try {
+        const result = await getEpisodeStream(selected.title, playing.number, selected.id);
+        setStream(result);
+      } catch (err) {
+        setStreamError(err instanceof Error ? err.message : 'Could not load stream.');
+      } finally {
+        setLoadingStream(false);
+      }
     }
   };
 
@@ -324,7 +507,7 @@ export function AnimeSection() {
       <div id="anime-player-view" className="flex flex-col h-full rounded-xs border border-white/10 bg-[#0a0a0a] text-[#e0e0e0] overflow-hidden shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 bg-[#0d0d0d] border-b border-white/10">
           <button
-            onClick={() => { setPlaying(null); setStream(null); setStreamError(''); }}
+            onClick={() => { setPlaying(null); setStream(null); setStreamError(''); setServers([]); setActiveServerId(null); }}
             className="px-3 py-1.5 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
           >
             <ChevronLeft className="w-3.5 h-3.5" /> Back to Anime
@@ -332,30 +515,73 @@ export function AnimeSection() {
           <span className="font-serif italic text-sm text-white truncate max-w-[140px] sm:max-w-md">
             {selected?.title} • Ep. {playing.number}
           </span>
-          {stream && sources.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              {sources.map((s: VideoSource, i: number) => (
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {/* Sub/Dub toggle */}
+            <div className="flex border border-white/10 rounded-xs overflow-hidden">
+              <button
+                onClick={() => handleAudioToggle('sub')}
+                className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                  audioType === 'sub' ? 'bg-white text-black' : 'text-[#a0a0a0] hover:text-white'
+                }`}
+              >
+                Sub
+              </button>
+              <button
+                onClick={() => handleAudioToggle('dub')}
+                className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                  audioType === 'dub' ? 'bg-white text-black' : 'text-[#a0a0a0] hover:text-white'
+                }`}
+              >
+                Dub
+              </button>
+            </div>
+            {/* Server pills — filtered by current audio type */}
+            {(() => {
+              const visible = servers.filter((s) => s.category === audioType);
+              return visible.length > 0 && visible.map((s) => (
                 <button
-                  key={`${s.quality}-${i}`}
-                  onClick={() => setActiveSource(i)}
+                  key={s.id}
+                  onClick={() => handleServerSwitch(s)}
+                  disabled={resolvingServer}
                   className={`px-2.5 py-1 rounded-xs text-[10px] font-bold uppercase tracking-wider border transition-colors ${
-                    i === activeSource
-                      ? 'bg-white text-black border-white'
-                      : 'border-white/10 text-[#a0a0a0] hover:text-white'
+                    s.id === activeServerId
+                      ? 'bg-red-600 text-white border-red-600'
+                      : 'border-white/10 text-[#a0a0a0] hover:text-white disabled:opacity-50'
                   }`}
                 >
-                  {s.quality}
+                  {s.name}
                 </button>
-              ))}
-            </div>
-          )}
+              ));
+            })()}
+            {/* Quality selector (existing) */}
+            {stream && sources.length > 1 && (
+              <>
+                <span className="text-[10px] text-[#606060]">|</span>
+                {sources.map((s: VideoSource, i: number) => (
+                  <button
+                    key={`${s.quality}-${i}`}
+                    onClick={() => setActiveSource(i)}
+                    className={`px-2.5 py-1 rounded-xs text-[10px] font-bold uppercase tracking-wider border transition-colors ${
+                      i === activeSource
+                        ? 'bg-white text-black border-white'
+                        : 'border-white/10 text-[#a0a0a0] hover:text-white'
+                    }`}
+                  >
+                    {s.quality}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto bg-black">
-          {loadingStream ? (
+          {loadingStream || resolvingServer ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-[#a0a0a0]">
               <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
-              <span className="text-xs uppercase tracking-widest font-mono">Resolving stream...</span>
+              <span className="text-xs uppercase tracking-widest font-mono">
+                {resolvingServer ? 'Switching server...' : 'Resolving stream...'}
+              </span>
               <span className="text-[10px] opacity-50">Searching available sources</span>
             </div>
           ) : streamError ? (
@@ -368,6 +594,11 @@ export function AnimeSection() {
                 Public stream providers are frequently blocked or offline. You can still watch this
                 episode in your phone's browser.
               </span>
+              {streamError && (
+                <code className="max-w-md text-center text-[10px] font-mono px-2 py-1 rounded-xs border border-white/10 bg-white/5 text-red-400 break-all">
+                  {streamError}
+                </code>
+              )}
               <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
                 <button
                   onClick={() => openInBrowser(fallbackUrls.hianime)}
@@ -400,12 +631,37 @@ export function AnimeSection() {
               <AnimePlayer
                 url={currentUrl}
                 title={`${selected?.title} Ep. ${playing.number}`}
+                subtitles={stream?.subtitles || []}
                 onFatalError={() => setStreamError('The video stream failed to play in-app.')}
               />
               {stream && stream.serverName && (
                 <p className="mt-3 text-center text-[10px] uppercase tracking-widest opacity-50">
-                  Source: {stream.serverName}
-                  {getActiveStreamHost() ? ` • ${getActiveStreamHost()!.replace(/^https?:\/\//, '')}` : ''}
+                  Server: {stream.serverName}
+                  {stream.subtitles.length > 0
+                    ? ` • ${stream.subtitles.length} subtitle track${stream.subtitles.length === 1 ? '' : 's'}`
+                    : ''}
+                </p>
+              )}
+            </div>
+          ) : stream?.embedUrl ? (
+            <div className="p-4 sm:p-6">
+              <div
+                className="relative bg-black rounded-xs overflow-hidden group"
+                style={{ aspectRatio: '16/9' }}
+              >
+                <iframe
+                  src={stream.embedUrl}
+                  className="absolute inset-0 w-full h-full border-0"
+                  title={`${selected?.title} Ep. ${playing.number}`}
+                  allowFullScreen
+                  allow="autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-write"
+                  referrerPolicy="origin"
+                  loading="lazy"
+                />
+              </div>
+              {stream.serverName && (
+                <p className="mt-3 text-center text-[10px] uppercase tracking-widest opacity-50">
+                  Source: {stream.serverName} • subtitles are inside the player
                 </p>
               )}
             </div>

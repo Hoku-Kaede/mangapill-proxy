@@ -32,6 +32,8 @@ export interface VideoSource {
 export interface EpisodeSubtitle {
   file: string;
   label: string;
+  language?: string;
+  isDefault?: boolean;
 }
 
 export interface EpisodeStream {
@@ -40,6 +42,36 @@ export interface EpisodeStream {
   episodeId: string;
   episodeTitle: string;
   serverName: string;
+  embedUrl?: string;
+}
+
+// ---------- Multi-server support ----------
+
+export type ServerProvider = 'anixo' | 'anivault' | 'aniwatch' | 'kuhi';
+
+export interface StreamServerMeta {
+  id: string;
+  name: string;
+  provider: ServerProvider;
+  category: 'sub' | 'dub';
+  /** AniVault: server name to request (e.g. "HD-2") */
+  vaultServer?: string;
+  /** AniVault: upstream source (e.g. "anikoto", "animeheaven") */
+  vaultSource?: string;
+  /** AniXo: the host that returned this server */
+  anixoHost?: string;
+  /** AniXo: server label from the watch response */
+  anixoServerLabel?: string;
+  /** Aniwatch: the server ID from the API */
+  aniwatchServerId?: string;
+  /** Aniwatch: category for the server request */
+  aniwatchCategory?: 'sub' | 'dub';
+  /** Aniwatch: episode server ID */
+  aniwatchEpisodeId?: string;
+  /** Kuhi: upstream provider (e.g. "neko", "egg", "koto") */
+  kuhiProvider?: string;
+  /** Kuhi: episode ID string (e.g. "watch/neko/178789/sub/neko-5") */
+  kuhiEpisodeId?: string;
 }
 
 // ---------- AniList catalog ----------
@@ -203,6 +235,17 @@ const PROBE_TIMEOUT_MS = 8000;
 // by AniList ID, plus an HLS proxy that rewrites segments with the required
 // Referer header so streams are playable in-app. This is the primary source.
 const ANIXO_HOSTS = ['https://anivexaapi-aniko2.hf.space'];
+
+// Free HF Spaces spin down when idle and can take a while to cold-start, so
+// the AniXo path is retried with this generous timeout before giving up.
+const ANIXO_COLD_TIMEOUT_MS = 45000;
+
+// Fire-and-forget ping to wake the AniXo HF Space out of its idle spin-down.
+export function warmAnixo(): void {
+  for (const host of ANIXO_HOSTS) {
+    fetch(host, { mode: 'no-cors', keepalive: true }).catch(() => {});
+  }
+}
 
 export function getCustomStreamHost(): string | null {
   try {
@@ -438,19 +481,7 @@ async function getEpisodeServers(episodeId: string): Promise<StreamServer[]> {
   return ranked;
 }
 
-export async function getEpisodeStream(
-  title: string,
-  episodeNumber: number,
-  anilistId?: number
-): Promise<EpisodeStream> {
-  // Primary path: AniXo (Anikoto via AniList ID) — reliable and working today.
-  if (anilistId) {
-    try {
-      return await getAnixoStream(anilistId, episodeNumber);
-    } catch {
-      // fall through to the title-based aniwatch path
-    }
-  }
+async function getAniwatchStream(title: string, episodeNumber: number): Promise<EpisodeStream> {
   const animeId = await searchStreamAnime(title);
   const episodes = await getStreamEpisodes(animeId);
 
@@ -496,6 +527,28 @@ export async function getEpisodeStream(
   throw lastErr || new Error('No playable source returned');
 }
 
+export async function getEpisodeStream(
+  title: string,
+  episodeNumber: number,
+  anilistId?: number
+): Promise<EpisodeStream> {
+  // Primary path: AniXo (Anikoto via AniList ID).
+  if (anilistId) {
+    try {
+      return await getAnixoStream(anilistId, episodeNumber);
+    } catch (err) {
+      // The bundled aniwatch hosts are all dead (500/402), so only attempt that
+      // path when the user has configured a custom instance. This avoids a long,
+      // pointless wait before surfacing the real error.
+      if (getCustomStreamHost()) {
+        return getAniwatchStream(title, episodeNumber);
+      }
+      throw err;
+    }
+  }
+  return getAniwatchStream(title, episodeNumber);
+}
+
 // ---------- AniXo (Anikoto) provider ----------
 
 interface AnixoEpisodeDto {
@@ -518,63 +571,138 @@ interface AnixoSubtitleDto {
   label?: string;
   kind?: string;
   default?: boolean;
+  language?: string;
 }
 
 // Real per-episode data (numbers + titles) for a title, keyed by AniList ID.
+async function tryAnixoEpisodes(host: string, anilistId: number, timeoutMs: number): Promise<AnimeEpisode[]> {
+  const res = await fetchWithTimeout(`${host}/api/episodes/${anilistId}`, timeoutMs);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const sub: AnixoEpisodeDto[] = json?.episodes?.sub || json?.sub || [];
+  const list = sub
+    .filter((e) => e && e.number != null)
+    .map((e) => ({ number: Number(e.number), title: e.title || '' }));
+  if (list.length > 0) return list;
+  throw new Error('no sub episodes');
+}
+
 export async function getAnixoEpisodes(anilistId: number): Promise<AnimeEpisode[]> {
   let lastErr: unknown = null;
-  for (const host of ANIXO_HOSTS) {
-    try {
-      const res = await fetchWithTimeout(`${host}/api/episodes/${anilistId}`, PROBE_TIMEOUT_MS);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const sub: AnixoEpisodeDto[] = json?.episodes?.sub || json?.sub || [];
-      const list = sub
-        .filter((e) => e && e.number != null)
-        .map((e) => ({ number: Number(e.number), title: e.title || '' }));
-      if (list.length > 0) return list;
-      throw new Error('no sub episodes');
-    } catch (err) {
-      lastErr = err;
+  for (const timeoutMs of [PROBE_TIMEOUT_MS, ANIXO_COLD_TIMEOUT_MS]) {
+    for (const host of ANIXO_HOSTS) {
+      try {
+        return await tryAnixoEpisodes(host, anilistId, timeoutMs);
+      } catch (err) {
+        lastErr = err;
+      }
     }
   }
   throw lastErr || new Error('AniXo episode list unavailable');
 }
 
+// MegaPlay serves its embed pages with an HTTP 200 even when the underlying
+// file was removed (it renders a branded "Error Code: 404" page instead). Check
+// the page content so the player doesn't iframe a dead embed.
+async function isEmbedAlive(url: string): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'text/html' } });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const html = await res.text();
+    // Detect various error patterns from megaplay.buzz / filemoon embeds
+    return !/error[- ]code/i.test(html) && !/error - megaplay/i.test(html) && !/not found/i.test(html);
+  } catch {
+    return false;
+  }
+}
+
+async function tryAnixoWatch(
+  host: string,
+  anilistId: number,
+  audio: 'sub' | 'dub',
+  epNum: number,
+  timeoutMs: number
+): Promise<EpisodeStream> {
+  const res = await fetchWithTimeout(`${host}/api/watch/${anilistId}/${audio}/${epNum}`, timeoutMs);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = json?.ssub || json?.sdub || (json as any);
+  const streams: AnixoStreamDto[] = data?.streams || [];
+  const hls = streams
+    .filter((s) => s?.type === 'hls' && s?.url)
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  const embeds = streams
+    .filter((s) => s?.type === 'embed' && s?.url)
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  if (hls.length === 0 && embeds.length === 0) throw new Error('No playable source returned');
+
+  const base = host.replace(/\/+$/, '');
+  const episodeId = `${anilistId}/${audio}/${epNum}`;
+  const episodeTitle = `${audio === 'dub' ? 'Dub' : 'Episode'} ${epNum}`;
+
+  // Some episodes only come as an embed player (megaplay.buzz), with no HLS
+  // stream to play natively. Verify the embed is live before offering it.
+  if (hls.length === 0) {
+    for (const e of embeds) {
+      if (!(await isEmbedAlive(e.url!))) continue;
+      return {
+        sources: [],
+        subtitles: [],
+        embedUrl: e.url!,
+        episodeId,
+        episodeTitle,
+        serverName: `${e.server || 'Embed'}${data?.provider ? ` • ${data.provider}` : ''}`,
+      };
+    }
+    throw new Error('This episode is only available via an embed provider that is currently offline');
+  }
+
+  const best = hls[0];
+  const referer = best.referer || '';
+  // Route both the HLS stream and its subtitles through the AniXo proxy so
+  // the files are fetched with the required Referer and served with CORS
+  // headers (otherwise the browser refuses to load them in-app).
+  const proxyPath = (u: string) =>
+    `${base}/api/proxy?url=${encodeURIComponent(/^https?:\/\//i.test(u) ? u : new URL(u, base).toString())}&referer=${encodeURIComponent(referer)}`;
+  const proxyUrl = proxyPath(best.url!);
+  // AniXo repeats the same subtitle set per provider (Nexus/Aurora/Orbit);
+  // dedupe by label, preferring the entry flagged as the default one.
+  const seenSubs = new Map<string, AnixoSubtitleDto>();
+  for (const s of data?.subtitles || []) {
+    if (!s?.file) continue;
+    const key = String(s.label || s.language || '');
+    const prev = seenSubs.get(key);
+    if (!prev || s.default) seenSubs.set(key, s);
+  }
+  const subtitles: EpisodeSubtitle[] = [...seenSubs.values()].map((s) => ({
+    file: proxyPath(String(s.file)),
+    label: String(s.label || ''),
+    language: String(s.language || ''),
+    isDefault: !!s.default,
+  }));
+
+  return {
+    sources: [{ url: proxyUrl, quality: 'auto', isM3U8: true }],
+    subtitles,
+    episodeId,
+    episodeTitle,
+    serverName: `${best.server || 'Anikoto'}${data?.provider ? ` • ${data.provider}` : ''}`,
+  };
+}
+
 async function getAnixoWatch(anilistId: number, audio: 'sub' | 'dub', epNum: number): Promise<EpisodeStream> {
   let lastErr: unknown = null;
-  for (const host of ANIXO_HOSTS) {
-    try {
-      const res = await fetchWithTimeout(
-        `${host}/api/watch/${anilistId}/${audio}/${epNum}`,
-        PROBE_TIMEOUT_MS
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = json?.ssub || json?.sdub || (json as any);
-      const streams: AnixoStreamDto[] = data?.streams || [];
-      const hls = streams
-        .filter((s) => s?.type === 'hls' && s?.url)
-        .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      if (hls.length === 0) throw new Error('No HLS source returned');
-
-      const base = host.replace(/\/+$/, '');
-      const best = hls[0];
-      const proxyUrl = `${base}/api/proxy?url=${encodeURIComponent(best.url!)}&referer=${encodeURIComponent(best.referer || '')}`;
-      const subtitles: EpisodeSubtitle[] = (data?.subtitles || [])
-        .filter((s: AnixoSubtitleDto) => s?.file)
-        .map((s: AnixoSubtitleDto) => ({ file: String(s.file), label: String(s.label || '') }));
-
-      return {
-        sources: [{ url: proxyUrl, quality: 'auto', isM3U8: true }],
-        subtitles,
-        episodeId: `${anilistId}/${audio}/${epNum}`,
-        episodeTitle: `${audio === 'dub' ? 'Dub' : 'Episode'} ${epNum}`,
-        serverName: `${best.server || 'Anikoto'}${data?.provider ? ` • ${data.provider}` : ''}`,
-      };
-    } catch (err) {
-      lastErr = err;
+  for (const timeoutMs of [PROBE_TIMEOUT_MS, ANIXO_COLD_TIMEOUT_MS]) {
+    for (const host of ANIXO_HOSTS) {
+      try {
+        return await tryAnixoWatch(host, anilistId, audio, epNum, timeoutMs);
+      } catch (err) {
+        lastErr = err;
+      }
     }
   }
   throw lastErr || new Error('AniXo stream unavailable');
@@ -582,6 +710,376 @@ async function getAnixoWatch(anilistId: number, audio: 'sub' | 'dub', epNum: num
 
 export async function getAnixoStream(anilistId: number, episodeNumber: number): Promise<EpisodeStream> {
   return getAnixoWatch(anilistId, 'sub', episodeNumber);
+}
+
+// ---------- AniVault provider ----------
+
+const ANIVAULT_API = 'https://anivault-scraper.vercel.app';
+
+// AniVault aggregates multiple upstream sources. Each source covers different
+// episodes — anikoto has eps 1-7 for many shows, animeheaven fills later eps.
+const ANIVAULT_SOURCES = ['anikoto', 'animeheaven'] as const;
+
+interface AnivaultResponse {
+  anilistId?: number;
+  title?: string;
+  episode?: number;
+  type?: string;
+  source?: string;
+  server?: string;
+  availableServers?: string[];
+  embedUrl?: string;
+  streamUrl?: string;
+  rawStreamUrl?: string;
+  mp4?: string;
+  mp4ProxyUrl?: string;
+  m3u8?: string;
+  hlsProxyUrl?: string;
+  playbackMode?: string;
+  iframeOnly?: boolean;
+  subtitles?: { url: string; lang: string; default?: boolean }[];
+  error?: string;
+  detail?: string;
+}
+
+async function fetchAnivaultSource(
+  source: string,
+  anilistId: number,
+  episode: number,
+  type: 'sub' | 'dub',
+  server?: string
+): Promise<AnivaultResponse> {
+  let url = `${ANIVAULT_API}/api/watch/${source}/${anilistId}/${episode}/${type}`;
+  if (server) url += `?server=${encodeURIComponent(server)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.detail || json.error);
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getAnivaultServersForEpisode(
+  anilistId: number,
+  episodeNumber: number
+): Promise<StreamServerMeta[]> {
+  const allServers: StreamServerMeta[] = [];
+
+  // Try each AniVault source for both sub and dub
+  for (const source of ANIVAULT_SOURCES) {
+    for (const type of ['sub', 'dub'] as const) {
+      try {
+        const resp = await fetchAnivaultSource(source, anilistId, episodeNumber, type);
+        const servers: string[] = resp.availableServers || [];
+        const hasStream = resp.m3u8 || resp.mp4 || resp.streamUrl;
+        if (servers.length === 0 && !hasStream) continue;
+        if (servers.length === 0 && resp.server) servers.push(resp.server);
+
+        const sourceLabel = source === 'animeheaven' ? 'AH' : '';
+
+        for (const name of servers) {
+          const displayName = sourceLabel ? `${sourceLabel} ${name}` : name;
+          const id = `av-${source}-${anilistId}-${episodeNumber}-${type}-${name}`;
+          if (allServers.some((s) => s.id === id)) continue;
+          allServers.push({
+            id,
+            name: type === 'dub' ? `${displayName} (Dub)` : displayName,
+            provider: 'anivault' as ServerProvider,
+            category: type,
+            vaultServer: name,
+            vaultSource: source,
+          });
+        }
+      } catch {
+        // Skip failed source/type
+      }
+    }
+  }
+  return allServers;
+}
+
+function buildProxyUrl(m3u8Url: string, referer: string): string {
+  // Use AniVault's built-in HLS proxy which handles referer + URL rewriting.
+  return `${ANIVAULT_API}/api/proxy/hls?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+}
+
+function proxySubtitleUrl(url: string, referer: string): string {
+  // Subtitle files on cdn.watching.onl also require the megaplay.buzz referer.
+  // Route them through AniVault's HLS proxy so they load in-app.
+  return `${ANIVAULT_API}/api/proxy/hls?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(referer)}`;
+}
+
+async function resolveAnivaultServer(
+  meta: StreamServerMeta,
+  anilistId: number,
+  episodeNumber: number
+): Promise<EpisodeStream> {
+  const source = meta.vaultSource || 'anikoto';
+  const resp = await fetchAnivaultSource(source, anilistId, episodeNumber, meta.category, meta.vaultServer);
+
+  const subtitles: EpisodeSubtitle[] = (resp.subtitles || []).map((s) => ({
+    file: proxySubtitleUrl(s.url, 'https://megaplay.buzz/'),
+    label: s.lang || 'English',
+    language: s.lang || 'en',
+    isDefault: !!s.default,
+  }));
+
+  // Handle MP4 playback (animeheaven returns direct MP4)
+  if (resp.streamUrl || resp.mp4ProxyUrl || resp.mp4) {
+    const mp4Url = resp.streamUrl || resp.mp4ProxyUrl || resp.mp4!;
+    return {
+      sources: [{ url: mp4Url, quality: 'auto', isM3U8: false }],
+      subtitles,
+      episodeId: `anivault-${source}-${anilistId}-${episodeNumber}`,
+      episodeTitle: `Episode ${episodeNumber}`,
+      serverName: `AniVault • ${resp.server || meta.name}`,
+    };
+  }
+
+  // Handle HLS playback (anikoto returns m3u8)
+  if (!resp.m3u8) throw new Error('No stream returned from AniVault');
+
+  const referer = 'https://megaplay.buzz/';
+  const proxyUrl = buildProxyUrl(resp.m3u8, referer);
+  return {
+    sources: [{ url: proxyUrl, quality: 'auto', isM3U8: true }],
+    subtitles,
+    episodeId: `anivault-${source}-${anilistId}-${episodeNumber}`,
+    episodeTitle: `Episode ${episodeNumber}`,
+    serverName: `AniVault • ${resp.server || meta.name}`,
+  };
+}
+
+// ---------- Multi-server API ----------
+
+// ---------- Kuhi provider (anime-scraper-v2.vercel.app) ----------
+
+const KUHI_API = 'https://anime-scraper-v2.vercel.app';
+
+// Kuhi aggregates multiple upstream sources. Best coverage:
+// - neko: HLS + subtitles, eps 1-11 for currently airing shows
+// - egg: MP4 (up to 1080p), broader episode range but no embedded subs
+// - koto: limited (often only ep 1)
+const KUHI_PROVIDERS = ['neko', 'egg'] as const;
+
+interface KuhiEpisodeEntry {
+  number: number;
+  title?: string;
+  id: string;
+  audio: 'sub' | 'dub';
+}
+
+interface KuhiEpisodesResponse {
+  [provider: string]: {
+    episodes?: {
+      sub?: KuhiEpisodeEntry[];
+      dub?: KuhiEpisodeEntry[];
+    };
+  };
+}
+
+interface KuhiStreamEntry {
+  url: string;
+  type: 'hls' | 'mp4' | 'embed';
+  quality?: string;
+  referer?: string;
+  server?: string;
+  embed?: string;
+  audio?: string;
+  isActive?: boolean;
+}
+
+interface KuhiWatchResponse {
+  anilistId?: number;
+  episode?: number;
+  audio?: string;
+  streams?: KuhiStreamEntry[];
+}
+
+async function fetchKuhiEpisodes(anilistId: number): Promise<KuhiEpisodesResponse> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${KUHI_API}/episodes/${anilistId}`, {
+      signal: ctrl.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchKuhiWatch(episodeId: string): Promise<KuhiWatchResponse> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${KUHI_API}/${episodeId}`, {
+      signal: ctrl.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getKuhiServersForEpisode(
+  anilistId: number,
+  episodeNumber: number
+): Promise<StreamServerMeta[]> {
+  const allServers: StreamServerMeta[] = [];
+
+  try {
+    const episodesData = await fetchKuhiEpisodes(anilistId);
+
+    for (const provider of KUHI_PROVIDERS) {
+      const providerData = episodesData[provider];
+      if (!providerData?.episodes) continue;
+
+      for (const audioType of ['sub', 'dub'] as const) {
+        const eps = providerData.episodes[audioType] || [];
+        const match = eps.find((e) => e.number === episodeNumber);
+        if (!match) continue;
+
+        const id = `kuhi-${provider}-${anilistId}-${episodeNumber}-${audioType}`;
+        const displayName = provider.toUpperCase();
+        allServers.push({
+          id,
+          name: audioType === 'dub' ? `${displayName} (Dub)` : displayName,
+          provider: 'kuhi' as ServerProvider,
+          category: audioType,
+          kuhiProvider: provider,
+          kuhiEpisodeId: match.id,
+        });
+      }
+    }
+  } catch {
+    // Kuhi API is down or unreachable
+  }
+
+  return allServers;
+}
+
+async function resolveKuhiServer(
+  meta: StreamServerMeta,
+  _anilistId: number,
+  _episodeNumber: number
+): Promise<EpisodeStream> {
+  if (!meta.kuhiEpisodeId) throw new Error('No Kuhi episode ID');
+
+  const watchData = await fetchKuhiWatch(meta.kuhiEpisodeId);
+  const streams = watchData.streams || [];
+
+  if (streams.length === 0) throw new Error('No streams returned from Kuhi');
+
+  // Pick the best HLS stream first, then MP4, skip embeds
+  const hls = streams.filter((s) => s.type === 'hls' && s.url);
+  const mp4 = streams.filter((s) => s.type === 'mp4' && s.url);
+  const ordered = [...hls, ...mp4];
+
+  if (ordered.length === 0) throw new Error('No playable streams returned from Kuhi');
+
+  const best = ordered[0];
+  const isHls = best.type === 'hls';
+
+  // Extract subtitles from the stream URL params or use known patterns.
+  // Kuhi/AniNeko embeds subtitle URLs in the referer or embed URL.
+  const subtitles: EpisodeSubtitle[] = [];
+  // The VTT subtitle file can often be extracted from the embed URL's sub param
+  for (const s of streams) {
+    const refUrl = s.referer || s.embed || '';
+    const subMatch = refUrl.match(/sub(?:_1)?=([^&]+)/);
+    if (subMatch) {
+      const subUrl = decodeURIComponent(subMatch[1]);
+      if (subUrl.endsWith('.vtt')) {
+        // Route through our proxy for CORS
+        const proxied = `/hls?url=${encodeURIComponent(subUrl)}&ref=${encodeURIComponent(s.referer || '')}`;
+        subtitles.push({ file: proxied, label: 'English', language: 'en', isDefault: true });
+        break;
+      }
+    }
+  }
+
+  const epId = meta.kuhiEpisodeId;
+  const epNum = _episodeNumber;
+  const serverLabel = best.server || meta.kuhiProvider?.toUpperCase() || 'Kuhi';
+
+  if (isHls) {
+    // HLS streams from vibevibe.workers.dev already have CORS.
+    // But we may need to proxy for referer or if CORS is missing.
+    const streamUrl = best.url;
+    return {
+      sources: [{ url: streamUrl, quality: best.quality || 'auto', isM3U8: true }],
+      subtitles,
+      episodeId: epId,
+      episodeTitle: `Episode ${epNum}`,
+      serverName: `Kuhi • ${serverLabel}`,
+    };
+  }
+
+  // MP4 streams (egg provider)
+  // Map quality strings to proper format
+  const mappedSources = mp4.map((s) => ({
+    url: s.url,
+    quality: s.quality || 'auto',
+    isM3U8: false,
+  }));
+
+  return {
+    sources: mappedSources.length > 0 ? mappedSources : [{ url: best.url, quality: best.quality || 'auto', isM3U8: false }],
+    subtitles,
+    episodeId: epId,
+    episodeTitle: `Episode ${epNum}`,
+    serverName: `Kuhi • ${serverLabel}`,
+  };
+}
+
+// ---------- Multi-server API ----------
+
+export async function listEpisodeServers(
+  title: string,
+  episodeNumber: number,
+  anilistId?: number
+): Promise<StreamServerMeta[]> {
+  const servers: StreamServerMeta[] = [];
+
+  // AniVault servers (if we have an AniList ID)
+  if (anilistId) {
+    const vaultServers = await getAnivaultServersForEpisode(anilistId, episodeNumber);
+    servers.push(...vaultServers);
+  }
+
+  // Kuhi servers (if we have an AniList ID)
+  if (anilistId) {
+    const kuhiServers = await getKuhiServersForEpisode(anilistId, episodeNumber);
+    servers.push(...kuhiServers);
+  }
+
+  return servers;
+}
+
+export async function resolveEpisodeServer(
+  meta: StreamServerMeta,
+  title: string,
+  episodeNumber: number,
+  anilistId?: number
+): Promise<EpisodeStream> {
+  if (meta.provider === 'anivault' && anilistId) {
+    return resolveAnivaultServer(meta, anilistId, episodeNumber);
+  }
+  if (meta.provider === 'kuhi' && anilistId) {
+    return resolveKuhiServer(meta, anilistId, episodeNumber);
+  }
+  // Fallback: use the existing getEpisodeStream for anixo/aniwatch
+  return getEpisodeStream(title, episodeNumber, anilistId);
 }
 
 // ---------- Browser fallback URLs ----------

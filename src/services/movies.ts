@@ -107,7 +107,14 @@ export function buildMovieServers(movie: MovieItem): MovieServer[] {
   // multiembed.mov expects `?video_id={tmdb}&tmdb=1` for TMDB ids or a bare
   // `?video_id={imdb}` for IMDb ids.
   const embedId = `${encodeURIComponent(tmdb || imdb)}${tmdb ? '&tmdb=1' : ''}`;
+  const tmdbId = tmdb || imdb;
   return [
+    { id: 'vidsrc-hair', name: 'VidSrc Hair', url: `https://vidsrc.hair/embed/movie/${tmdb || imdb}` },
+    { id: 'vidsrc-sbs', name: 'VidSrc SBS', url: `https://vidsrc.sbs/embed/movie/${tmdb || imdb}` },
+    { id: 'vidcore', name: 'VidCore', url: `https://vidcore.org/embed/movie/${tmdb || imdb}` },
+    { id: 'pro-multi', name: 'Pro Multi', url: `https://web.nxsha.app/embed/movie/${encodeURIComponent(tmdbId)}?server=AwsPly-[Multi-Lang]` },
+    { id: 'cinesrc', name: 'CineSrc', url: `https://cinesrc.st/embed/movie/${encodeURIComponent(tmdbId)}` },
+    { id: '4k', name: '4K', url: `https://player.videasy.net/movie/${encodeURIComponent(tmdbId)}` },
     { id: 'superembed-vip', name: 'SuperEmbed VIP', url: `https://multiembed.mov/directstream.php?video_id=${embedId}` },
     { id: 'superembed', name: 'SuperEmbed', url: `https://multiembed.mov/?video_id=${embedId}` },
     { id: 'vidsrc', name: 'VidSrc', url: `https://vidsrc.to/embed/movie/${tmdb || imdb}` },

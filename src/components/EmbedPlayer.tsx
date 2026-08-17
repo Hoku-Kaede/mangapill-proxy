@@ -1,4 +1,5 @@
-import { AlertTriangle, CheckCircle2, ChevronLeft, Gauge, MonitorPlay, RefreshCw, Subtitles, XCircle } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, Gauge, Maximize, Minimize, MonitorPlay, Play, RefreshCw, Subtitles, XCircle } from 'lucide-react';
 import { MovieServer, ServerStatus } from '../services/movies';
 
 interface EmbedPlayerProps {
@@ -30,6 +31,46 @@ export function EmbedPlayer({
   const activeStatus = statuses?.find((s) => s.id === activeServerId) || null;
   const activeUrl = activeStatus?.url || '';
   const online = statuses?.filter((s) => s.ok).length ?? 0;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [shieldActive, setShieldActive] = useState(true);
+  const shieldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset shield when server changes
+  useEffect(() => {
+    setShieldActive(true);
+    if (shieldTimerRef.current) clearTimeout(shieldTimerRef.current);
+  }, [activeUrl]);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(
+        !!document.fullscreenElement || !!(document as any).webkitFullscreenElement
+      );
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const fs = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (fs) {
+      (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
+    } else {
+      (el.requestFullscreen || (el as any).webkitRequestFullscreen)?.call(el);
+    }
+  };
+
+  const dismissShield = () => {
+    setShieldActive(false);
+  };
 
   return (
     <div id="embed-player-view" className="flex flex-col h-full rounded-xs border border-white/10 bg-[#0a0a0a] text-[#e0e0e0] overflow-hidden shadow-2xl">
@@ -61,9 +102,10 @@ export function EmbedPlayer({
             <span className="text-[10px] opacity-50">Auto-selecting the fastest one</span>
           </div>
         ) : activeUrl ? (
-          <div className="p-4 sm:p-6">
-            <div className="relative bg-black rounded-xs overflow-hidden" style={{ aspectRatio: '16/9' }}>
+          <div ref={containerRef} className="p-4 sm:p-6">
+            <div className="relative bg-black rounded-xs overflow-hidden group" style={isFullscreen ? { aspectRatio: 'unset', height: '100%' } : { aspectRatio: '16/9' }}>
               <iframe
+                ref={iframeRef}
                 src={activeUrl}
                 className="absolute inset-0 w-full h-full border-0"
                 title={title}
@@ -72,6 +114,27 @@ export function EmbedPlayer({
                 referrerPolicy="origin"
                 loading="lazy"
               />
+              {/* Click shield: absorbs the first tap which triggers the ad redirect.
+                  After dismissal, clicks pass through to the iframe. */}
+              {shieldActive && (
+                <div
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismissShield(); }}
+                  className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/40 cursor-pointer"
+                >
+                  <div className="flex flex-col items-center gap-2 px-6 py-4 rounded-lg bg-black/70 border border-white/20">
+                    <Play className="w-8 h-8 text-white" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-white">Tap to Play</span>
+                    <span className="text-[10px] text-white/60">Tap here to start the player</span>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                className="absolute bottom-3 right-3 p-2 bg-black/60 hover:bg-black/80 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                aria-label="Toggle fullscreen"
+              >
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
             </div>
             {activeStatus && (
               <p className="mt-3 text-center text-[10px] uppercase tracking-widest opacity-50">

@@ -3,11 +3,12 @@ import { LiveMangaDexReader } from './components/LiveMangaDexReader';
 import { AnimeSection } from './components/AnimeSection';
 import { MoviesSection } from './components/MoviesSection';
 import { SeriesSection } from './components/SeriesSection';
-import { BookOpen, Clapperboard, Film, MonitorPlay, Moon, ScrollText, Sun } from 'lucide-react';
+import { BookOpen, Clapperboard, Film, MonitorPlay, Moon, ScrollText, Sun, Tv } from 'lucide-react';
+import { MiraculousSection } from './components/MiraculousSection';
 
 export default function App() {
   const [isDark, setIsDark] = useState<boolean>(true);
-  const [section, setSection] = useState<'manga' | 'manhwa' | 'anime' | 'movies' | 'series'>('manga');
+  const [section, setSection] = useState<'manga' | 'manhwa' | 'anime' | 'movies' | 'series' | 'miraculous'>('manga');
 
   return (
     <div className={`h-dvh flex flex-col overflow-hidden ${isDark ? 'dark bg-[#0a0a0a] text-[#e0e0e0]' : 'bg-[#f4f4f5] text-[#18181b]'} transition-colors font-sans antialiased`}>
@@ -81,6 +82,15 @@ export default function App() {
               <MonitorPlay className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Series</span>
             </button>
+            <button
+              onClick={() => setSection('miraculous')}
+              className={`px-3 py-1.5 rounded-xs transition-colors flex items-center gap-1.5 ${
+                section === 'miraculous' ? 'bg-red-600 text-white font-bold' : 'text-[#a0a0a0] hover:text-white'
+              }`}
+            >
+              <Tv className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Miraculous</span>
+            </button>
           </div>
 
           {/* Dark / Light Toggle */}
@@ -105,6 +115,8 @@ export default function App() {
           <AnimeSection />
         ) : section === 'movies' ? (
           <MoviesSection />
+        ) : section === 'miraculous' ? (
+          <MiraculousSection />
         ) : (
           <SeriesSection />
         )}

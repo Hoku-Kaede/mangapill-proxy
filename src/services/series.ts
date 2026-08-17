@@ -91,7 +91,38 @@ export function buildSeriesServers(
 ): MovieServer[] {
   const id = series.tmdbId || series.id;
   const tmdbSuffix = series.tmdbId ? '&tmdb=1' : '';
+  const tmdbId = series.tmdbId || series.id;
   const servers: MovieServer[] = [
+    {
+      id: 'vidsrc-hair',
+      name: 'VidSrc Hair',
+      url: `https://vidsrc.hair/embed/tv/${series.tmdbId || id}/${season}/${episode}`,
+    },
+    {
+      id: 'vidsrc-sbs',
+      name: 'VidSrc SBS',
+      url: `https://vidsrc.sbs/embed/tv/${series.tmdbId || id}/${season}/${episode}`,
+    },
+    {
+      id: 'vidcore',
+      name: 'VidCore',
+      url: `https://vidcore.org/embed/tv/${series.tmdbId || id}/${season}/${episode}`,
+    },
+    {
+      id: 'pro-multi',
+      name: 'Pro Multi',
+      url: `https://web.nxsha.app/embed/tv/${encodeURIComponent(tmdbId)}/${season}/${episode}?server=AwsPly-[Multi-Lang]`,
+    },
+    {
+      id: 'cinesrc',
+      name: 'CineSrc',
+      url: `https://cinesrc.st/embed/tv/${encodeURIComponent(tmdbId)}?s=${season}&e=${episode}&color=FF1493&autoplay=true&autonext=true`,
+    },
+    {
+      id: '4k',
+      name: '4K',
+      url: `https://player.videasy.net/tv/${encodeURIComponent(tmdbId)}/${season}/${episode}`,
+    },
     {
       id: 'superembed-vip',
       name: 'SuperEmbed VIP',
