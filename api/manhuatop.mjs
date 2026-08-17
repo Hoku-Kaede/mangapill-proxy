@@ -1,7 +1,7 @@
 export const config = { runtime: 'edge' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const BASE = 'https://manhuatop.org';
+const BASE = 'https://manhuaplus.com';
 
 export default async function handler(req) {
   const url = new URL(req.url);
@@ -14,7 +14,7 @@ export default async function handler(req) {
       'User-Agent': UA,
       'Accept': req.headers.get('accept') || '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://manhuatop.org/',
+      'Referer': 'https://manhuaplus.com/',
     },
     redirect: 'follow',
   };
@@ -71,7 +71,7 @@ export default async function handler(req) {
 
 function rewriteUrls(html, base) {
   html = html.replace(
-    /((?:href|src|action)=["'])(https?:\/\/manhuatop\.org)(\/[^"']*?)(["'])/g,
+    /((?:href|src|action)=["'])(https?:\/\/manhuaplus\.com)(\/[^"']*?)(["'])/g,
     (match, prefix, _origin, path, suffix) => {
       return prefix + '/api/manhuatop?path=' + encodeURIComponent(path) + suffix;
     }
@@ -93,9 +93,9 @@ function rewriteUrls(html, base) {
     }
   );
   // Rewrite absolute manhuatop.org URLs inside JS strings
-  html = html.replace(/"https?:\/\/manhuatop\.org/g, '"/api/manhuatop?path=');
-  html = html.replace(/'https?:\/\/manhuatop\.org/g, "'/api/manhuatop?path=");
-  html = html.replace(/https?:\\\/\\\/manhuatop\.org/g, '/api/manhuatop?path=');
+  html = html.replace(/"https?:\/\/manhuaplus\.com/g, '"/api/manhuatop?path=');
+  html = html.replace(/'https?:\/\/manhuaplus\.com/g, "'/api/manhuatop?path=");
+  html = html.replace(/https?:\\\/\\\/manhuaplus\.com/g, '/api/manhuatop?path=');
   // Fix double-encoded paths
   html = html.replace(/\/api\/manhuatop\?path=https%3A%2F%2Fmanhuatop\.org/g, '/api/manhuatop?path=');
   html = html.replace(/\/api\/manhuatop\?path=https:\/\/manhuatop\.org/g, '/api/manhuatop?path=');
