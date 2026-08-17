@@ -16,7 +16,7 @@ export function MangaSection() {
       </div>
       <div className="flex-1 min-h-0">
         <iframe
-          src="https://asuracomic.net"
+          src="/api/proxy?url=https://asuracomic.net"
           title="Manga"
           className="w-full h-full border-0"
           allow="autoplay; fullscreen"
