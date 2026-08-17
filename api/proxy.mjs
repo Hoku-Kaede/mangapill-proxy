@@ -59,7 +59,7 @@ export default async function handler(req) {
     let body;
     if (isHtml) {
       let html = await upstream.text();
-      html = rewriteUrls(html, base);
+      html = injectBase(html, base);
       html = injectTheme(html);
       body = new TextEncoder().encode(html);
     } else {
@@ -78,142 +78,191 @@ export default async function handler(req) {
   }
 }
 
-function rewriteUrls(html, base) {
-  html = html.replace(
-    /((?:href|src|action)=["'])(\/[^"']*?)(["'])/g,
-    (match, prefix, path, suffix) => {
-      if (path.startsWith('//')) return match;
-      if (path.startsWith('http://') || path.startsWith('https://')) return match;
-      return prefix + base + path + suffix;
-    }
-  );
-  html = html.replace(
-    /((?:href|src|action)=)([^"'\s>]+)(?=[\s>])/g,
-    (match, prefix, path) => {
-      if (path.startsWith('//') || path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return match;
-      if (path.startsWith('/')) return prefix + base + path;
-      return match;
-    }
-  );
-  return html;
+function injectBase(html, base) {
+  const baseTag = `<base href="${base}">`;
+  if (html.includes('<head')) {
+    return html.replace(/<head[^>]*>/i, (match) => match + baseTag);
+  }
+  return baseTag + html;
 }
 
 const THEME_CSS = `
 <style id="comic-theme-override">
-  *, *::before, *::after {
+  :root {
     color-scheme: dark !important;
   }
-  html, body, #root, #__next, .app, main, .site-content, .content-area, .page-content, .main-content, .container, .wrapper, #content, #main {
-    background-color: #0a0a0a !important;
+
+  html, body {
+    background: #0a0a0a !important;
     color: #e0e0e0 !important;
   }
-  body {
-    background: #0a0a0a !important;
+
+  body * {
+    background-color: inherit !important;
+    color: inherit !important;
+    border-color: #222 !important;
   }
-  a, a *, .entry-title a, h2 a, h3 a, h4 a, .chapter-link, .listupd a, .bsx a, .bs a, .bigtitle a, .post-title a, .series-title a {
+
+  html, body, div, section, article, aside, main, footer, header, nav,
+  #root, #__next, .app, .site-content, .content-area, .page-content,
+  .main-content, .wrapper, #content, #main, .wrap, .container,
+  .bixbox, .listupd, .bigcontent, .section-story,
+  .manga, .chapter, .page-item-detail, .bsx, .bs, .bigor, .detpost,
+  .postbody, .releases, .chapterlist, .chapter-list, .listing-chapters,
+  .imptdt, .tsinfo, .infotable, .seriestucon, .seriestuhead,
+  .widget, .sidebar, aside, .widget-area,
+  .soratest, .series-genre, .manga-genre,
+  .nextprev, .nav-links, .pagination,
+  [class*="bg-"], [class*="background"], [class*="card"], [class*="panel"],
+  [class*="modal"], [class*="dropdown"], [class*="menu"], [class*="list"],
+  [class*="grid"], [class*="item"], [class*="post"], [class*="entry"],
+  [class*="page"], [class*="section"], [class*="row"], [class*="col"],
+  [class*="header"], [class*="footer"], [class*="nav"], [class*="bar"],
+  [class*="banner"], [class*="top-"], [class*="bottom-"],
+  [class*="sidebar"], [class*="aside"], [class*="content"],
+  [class*="site-"], [class*="page-"], [class*="main-"],
+  [class*="body"], [class*="text-"], [class*="font-"],
+  table, thead, tbody, tfoot, tr, td, th {
+    background-color: #0a0a0a !important;
+    color: #e0e0e0 !important;
+    border-color: #222 !important;
+  }
+
+  *, *::before, *::after {
+    color: #e0e0e0 !important;
+    border-color: #222 !important;
+  }
+
+  a, a *, a span, a div, a p, a h1, a h2, a h3, a h4, a h5, a h6,
+  a li, a td, a strong, a em, a b, a i, a small {
     color: #ef4444 !important;
   }
-  a:hover, a:hover * {
+  a:hover, a:hover *, a:hover span, a:hover div, a:hover p,
+  a:hover h1, a:hover h2, a:hover h3, a:hover h4 {
     color: #f87171 !important;
   }
-  h1, h2, h3, h4, h5, h6, .entry-title, .post-title, .series-title, .bigtitle, .section-title, .page-title, .tit {
+
+  h1, h2, h3, h4, h5, h6, strong, b, .title, .name, .heading {
     color: #f5f5f5 !important;
   }
-  p, span, li, td, th, label, input, select, textarea, div, .chapter-date, .chapternum, .eph-num, .listing-chapters_wrap {
+
+  p, span, li, td, th, label, small, em, i, blockquote, code, pre,
+  .chapter-date, .chapternum, .eph-num, .listing-chapters_wrap,
+  [class*="text-"], [class*="font-"] {
     color: #c0c0c0 !important;
   }
-  nav, header, footer, .navbar, .header, .footer, .sidebar, aside, .site-header, .site-footer, .top-header, .bottom-nav {
+
+  nav, header, footer, .navbar, .header, .footer, .sidebar, aside,
+  .site-header, .site-footer, .top-header, .bottom-nav,
+  [class*="navbar"], [class*="header"], [class*="footer"],
+  [class*="nav-"], [class*="top-"], [class*="bottom-"],
+  [class*="sidebar"], [class*="banner"], [class*="bar"] {
     background-color: #111111 !important;
     color: #e0e0e0 !important;
     border-color: #222 !important;
   }
-  .btn, button, .button, input[type="submit"], input[type="button"], .wp-block-button__link {
+
+  .btn, button, .button, input[type="submit"], input[type="button"],
+  [class*="btn"], [class*="button"], [role="button"] {
     background-color: #dc2626 !important;
     color: #ffffff !important;
     border-color: #991b1b !important;
   }
-  .btn:hover, button:hover, .button:hover, input[type="submit"]:hover {
+  .btn:hover, button:hover, .button:hover, input[type="submit"]:hover,
+  [class*="btn"]:hover, [class*="button"]:hover, [role="button"]:hover {
     background-color: #ef4444 !important;
   }
-  table, tr, td, th {
-    background-color: #141414 !important;
-    color: #d0d0d0 !important;
-    border-color: #222 !important;
+
+  .rating, .num, .ratingx, .numscore, .score, [class*="rating"],
+  [class*="score"], [class*="star"] {
+    color: #ef4444 !important;
   }
-  .widget, .sidebar, aside, .widget-area {
-    background-color: #111111 !important;
-    color: #d0d0d0 !important;
-    border-color: #222 !important;
+
+  .genre-item, .genre, .mgen, .wd-full, .spe, span.item,
+  [class*="genre"], [class*="tag"], [class*="badge"],
+  [class*="chip"], [class*="pill"], [class*="label"] {
+    background-color: #1a1a1a !important;
+    color: #c0c0c0 !important;
+    border-color: #333 !important;
   }
+  a.genre-item:hover, a.genre:hover, [class*="genre"]:hover,
+  [class*="tag"]:hover, [class*="badge"]:hover {
+    background-color: #dc2626 !important;
+    color: #ffffff !important;
+  }
+
+  a.page-numbers, .page-numbers a, .page-numbers.current,
+  [class*="pagination"] a, [class*="page-"] a, [class*="page-"] span {
+    background-color: #1a1a1a !important;
+    color: #ef4444 !important;
+    border-color: #333 !important;
+  }
+  .page-numbers.current, span.page-numbers.current,
+  [class*="pagination"] [class*="active"], [class*="page-"][class*="active"] {
+    background-color: #dc2626 !important;
+    color: #ffffff !important;
+  }
+
   input, select, textarea, .search-form input, .search {
     background-color: #1a1a1a !important;
     color: #e0e0e0 !important;
     border-color: #333 !important;
   }
-  ::-webkit-scrollbar {
-    background: #111 !important;
-    width: 8px !important;
+
+  img { opacity: 0.95; }
+
+  ::-webkit-scrollbar { background: #111 !important; width: 8px !important; }
+  ::-webkit-scrollbar-thumb { background: #dc2626 !important; border-radius: 4px !important; }
+  ::-webkit-scrollbar-track { background: #1a1a1a !important; }
+
+  *::selection { background: #dc2626 !important; color: #ffffff !important; }
+  ::-moz-selection { background: #dc2626 !important; color: #ffffff !important; }
+
+  *, *::before, *::after {
+    color-scheme: dark !important;
   }
-  ::-webkit-scrollbar-thumb {
-    background: #dc2626 !important;
-    border-radius: 4px !important;
-  }
-  img {
-    opacity: 0.92;
-  }
-  .dark, [data-theme="light"], [class*="light"] {
-    background-color: #0a0a0a !important;
-    color: #e0e0e0 !important;
-  }
-  .container, .wrap, .bixbox, .listupd, .bigcontent, .section-story, .chapter-location {
-    background-color: #0a0a0a !important;
-  }
-  .manga, .chapter, .page-item-detail, .bsx, .bs, .bigor, .detpost, .postbody {
-    background-color: #111111 !important;
-    border-color: #222 !important;
-  }
-  .releases, .chapterlist, .chapter-list, .listing-chapters, .eph-num {
-    background-color: #111111 !important;
-    color: #c0c0c0 !important;
-  }
-  .imptdt, .tsinfo, .infotable, .seriestucon, .seriestuhead {
-    background-color: #111111 !important;
-  }
-  .rating, .num, .ratingx, .numscore {
-    background-color: #1a1a1a !important;
+
+  /* Override yellow/amber/gold/orange — force to red */
+  [style*="color: yellow" i], [style*="color: gold" i],
+  [style*="color: #ff" i], [style*="color: orange" i],
+  [style*="color: amber" i], [style*="background: yellow" i],
+  [style*="background: gold" i], [style*="background: orange" i],
+  [style*="background: amber" i], [style*="background-color: yellow" i],
+  [style*="background-color: gold" i], [style*="background-color: orange" i],
+  [style*="background-color: amber" i],
+  [style*="color:#ff" i], [style*="color: #f59" i],
+  [style*="background:#ff" i], [style*="background: #ff" i],
+  [class*="yellow"], [class*="gold"], [class*="amber"],
+  [class*="orange"], [class*="warning"], [class*="warn"],
+  [class*="alert-"], [class*="notice"], [class*="info-box"],
+  [class*="highlight"], [class*="accent"], [class*="brand"],
+  [class*="primary"], [class*="theme-"], [class*="colored"] {
     color: #ef4444 !important;
-  }
-  .genre-item, .genre, .mgen, .wd-full, .spe, span.item {
     background-color: #1a1a1a !important;
-    color: #c0c0c0 !important;
-  }
-  a.genre-item:hover, a.genre:hover {
-    background-color: #dc2626 !important;
-    color: #ffffff !important;
-  }
-  .soratest, .series-genre, .manga-genre {
-    background-color: #1a1a1a !important;
-  }
-  .nextprev, .nav-links, .pagination, .page-numbers {
-    background-color: #111111 !important;
-    color: #c0c0c0 !important;
-  }
-  a.page-numbers, .page-numbers a, .page-numbers.current {
-    background-color: #1a1a1a !important;
-    color: #ef4444 !important;
     border-color: #333 !important;
   }
-  .page-numbers.current, span.page-numbers.current {
-    background-color: #dc2626 !important;
-    color: #ffffff !important;
+
+  [class*="yellow"] > *, [class*="gold"] > *, [class*="amber"] > *,
+  [class*="orange"] > *, [class*="warning"] > *, [class*="warn"] > *,
+  [class*="alert-"] > *, [class*="notice"] > *, [class*="info-box"] > *,
+  [class*="highlight"] > *, [class*="accent"] > *, [class*="brand"] > *,
+  [class*="primary"] > *, [class*="theme-"] > *, [class*="colored"] > * {
+    color: #e0e0e0 !important;
+    background-color: transparent !important;
   }
-  *::selection {
-    background: #dc2626 !important;
-    color: #ffffff !important;
+
+  a[class*="yellow"], a[class*="gold"], a[class*="amber"],
+  a[class*="orange"], a[class*="warning"], a[class*="accent"],
+  a[class*="primary"], a[class*="brand"] {
+    color: #ef4444 !important;
   }
-  ::-moz-selection {
-    background: #dc2626 !important;
-    color: #ffffff !important;
+
+  /* Force all background colors to dark variants */
+  [style*="background-color:" i] {
+    background-color: #0a0a0a !important;
+  }
+  [style*="background:" i]:not([style*="background: url" i]):not([style*="background-image" i]) {
+    background: #0a0a0a !important;
   }
 </style>`;
 
