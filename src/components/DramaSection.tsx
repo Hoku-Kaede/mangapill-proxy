@@ -1,29 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Search,
-  Play,
   ChevronLeft,
-  RefreshCw,
   AlertTriangle,
   Tv,
   Globe,
   ExternalLink,
   Clock,
   Film,
-  Maximize,
-  Minimize,
-  Volume2,
-  VolumeX,
+  RefreshCw,
 } from 'lucide-react';
-import Hls from 'hls.js';
 import {
   DramaItem,
   DramaDetail,
-  DramaVideoSource,
   searchDramas,
   listDramas,
   getDramaDetail,
-  getEpisodeSource,
   DRAMA_COUNTRIES,
   DRAMA_STATUS,
 } from '../services/kisskh';
@@ -44,9 +36,6 @@ export function DramaSection() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [playing, setPlaying] = useState<{ drama: DramaDetail; episode: { id: number; number: number } } | null>(null);
-  const [sources, setSources] = useState<DramaVideoSource[]>([]);
-  const [sourceLoading, setSourceLoading] = useState(false);
-  const [sourceError, setSourceError] = useState('');
 
   const PAGE_SIZE = 20;
 
@@ -140,31 +129,17 @@ export function DramaSection() {
 
   const handlePlay = async (drama: DramaDetail, ep: { id: number; number: number }) => {
     setPlaying({ drama, episode: ep });
-    setSources([]);
-    setSourceError('');
-    setSourceLoading(true);
-    try {
-      const srcs = await getEpisodeSource(ep.id);
-      setSources(srcs);
-      if (srcs.length === 0) {
-        setSourceError('Could not extract video source. Try watching on KissKH directly.');
-      }
-    } catch (err) {
-      console.error('[Drama] source fetch failed:', err);
-      setSourceError('Failed to load video. Try again or watch on KissKH.');
-    } finally {
-      setSourceLoading(false);
-    }
   };
 
   // ---------- Player view ----------
   if (playing) {
     const epNum = playing.episode.number;
+    const watchUrl = `https://kisskh.is/Watch/${playing.drama.id}-ep-${epNum}`;
     return (
       <div className="flex flex-col h-full rounded-xs border border-white/10 bg-[#0a0a0a] text-[#e0e0e0] overflow-hidden shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 bg-[#0d0d0d] border-b border-white/10">
           <button
-            onClick={() => { setPlaying(null); setSources([]); setSourceError(''); }}
+            onClick={() => { setPlaying(null); }}
             className="px-3 py-1.5 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
           >
             <ChevronLeft className="w-3.5 h-3.5" /> Back to Episodes
@@ -173,7 +148,7 @@ export function DramaSection() {
             {playing.drama.title} — Ep {epNum}
           </span>
           <a
-            href={`https://kisskh.is/Explore?type=Drama&id=${playing.drama.id}`}
+            href={watchUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="px-3 py-1.5 rounded-xs border border-white/20 hover:bg-white/10 text-white transition-colors flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest"
@@ -183,27 +158,13 @@ export function DramaSection() {
         </div>
 
         <div className="flex-1 min-h-0">
-          {sourceLoading ? (
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-[#a0a0a0]">
-              <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
-              <span className="text-xs uppercase tracking-widest font-mono">Loading video...</span>
-            </div>
-          ) : sourceError ? (
-            <div className="h-full flex flex-col items-center justify-center gap-3 text-[#a0a0a0] px-6">
-              <AlertTriangle className="w-8 h-8 text-red-500" />
-              <span className="text-xs uppercase tracking-widest text-center">{sourceError}</span>
-              <a
-                href={`https://kisskh.is/Watch/${playing.drama.id}-ep-${epNum}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 px-4 py-2 bg-white text-black font-bold uppercase text-[10px] tracking-[0.15em] hover:bg-red-500 hover:text-white rounded-xs transition-colors flex items-center gap-2"
-              >
-                <ExternalLink className="w-3.5 h-3.5" /> Watch on KissKH
-              </a>
-            </div>
-          ) : (
-            <DramaPlayer sources={sources} drama={playing.drama} episode={playing.episode} />
-          )}
+          <iframe
+            src={watchUrl}
+            title={`${playing.drama.title} Ep ${epNum}`}
+            className="w-full h-full border-0"
+            allow="autoplay; fullscreen; picture-in-picture"
+            referrerPolicy="no-referrer"
+          />
         </div>
       </div>
     );
@@ -471,100 +432,6 @@ export function DramaSection() {
             )}
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ---------- HLS Player sub-component ----------
-function DramaPlayer({
-  sources,
-  drama,
-  episode,
-}: {
-  sources: DramaVideoSource[];
-  drama: DramaDetail;
-  episode: { id: number; number: number };
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [activeSourceIdx, setActiveSourceIdx] = useState(0);
-
-  const activeSrc = sources[activeSourceIdx];
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !activeSrc) return;
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    const src = activeSrc.src;
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
-      hlsRef.current = hls;
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal && activeSourceIdx < sources.length - 1) {
-          setActiveSourceIdx((i) => i + 1);
-        }
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = src;
-      video.play().catch(() => {});
-    }
-
-    return () => { if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; } };
-  }, [activeSrc, activeSourceIdx, sources.length]);
-
-  const toggleFullscreen = () => {
-    const el = containerRef.current;
-    if (!el) return;
-    if (!document.fullscreenElement) {
-      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-    }
-  };
-
-  return (
-    <div ref={containerRef} className={`relative w-full h-full bg-black ${isFullscreen ? 'h-screen' : ''}`}>
-      <video ref={videoRef} className="w-full h-full object-contain" controls playsInline muted={isMuted} />
-      <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
-        {sources.length > 1 && (
-          <div className="flex items-center gap-1 bg-black/60 backdrop-blur rounded-xs px-1.5 py-1">
-            {sources.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => setActiveSourceIdx(i)}
-                className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded-xs transition-colors ${
-                  i === activeSourceIdx ? 'bg-red-600 text-white' : 'text-white/60 hover:text-white'
-                }`}
-              >
-                Srv {i + 1}
-              </button>
-            ))}
-          </div>
-        )}
-        <button onClick={() => setIsMuted(!isMuted)} className="p-1.5 bg-black/60 backdrop-blur rounded-xs text-white hover:bg-black/80 transition-colors">
-          {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-        </button>
-        <button onClick={toggleFullscreen} className="p-1.5 bg-black/60 backdrop-blur rounded-xs text-white hover:bg-black/80 transition-colors">
-          {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
-        </button>
-      </div>
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3 z-10">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
-          {drama.title} • Episode {episode.number}
-        </span>
       </div>
     </div>
   );
