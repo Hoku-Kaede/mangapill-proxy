@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
   try {
     const host = new URL(target).hostname;
-    if (!host.endsWith('mangadex.org')) {
+    if (!host.endsWith('mangadex.org') && !host.endsWith('mangadex.network')) {
       return res.status(400).json({ error: 'Only MangaDex URLs allowed' });
     }
   } catch {
