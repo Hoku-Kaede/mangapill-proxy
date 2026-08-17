@@ -5,7 +5,7 @@ const BASE = 'https://manhuatop.org';
 
 export default async function handler(req) {
   const url = new URL(req.url);
-  const path = url.searchParams.get('path') || '/manga-release-schedule/';
+  const path = url.searchParams.get('path') || '/';
   const target = `${BASE}${path}`;
 
   const fetchOptions = {
